@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shrimp-server"
+version = "0.1.0"
+description = "MCP Service for task and memory management"
+readme = "../README.md"
+requires-python = ">=3.8"
+authors = [
+    {name = "Nike", email = "weinaike@gmail.com"},
+]
+keywords = ["mcp", "task-management", "memory-management", "api"]
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "motor>=3.3.0",
+    "pydantic>=2.0.0",
+    "pymongo>=4.5.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.6",
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "mypy>=1.0.0",
+    "httpx>=0.25.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/weinaike/shrimp"
+Repository = "https://github.com/weinaike/shrimp.git"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shrimp*"]
+
+[tool.setuptools.package-data]
+"shrimp" = ["py.typed"]
