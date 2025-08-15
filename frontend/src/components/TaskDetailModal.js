@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Row, Col, Badge, Card, ListGroup } from 'react-bootstrap';
 import EditTaskModal from './EditTaskModal';
+import { apiEndpoints } from '../api/config';
 
 function TaskDetailModal({ show, handleClose, task, projectId, onTaskUpdated }) {
   const [loading, setLoading] = useState(!task);
@@ -27,12 +28,12 @@ function TaskDetailModal({ show, handleClose, task, projectId, onTaskUpdated }) 
     setLoading(true);
     try {
       const [taskResponse, todosResponse] = await Promise.all([
-        fetch(`/tasks/${projectId}/tasks/${taskId}`, {
+        fetch(apiEndpoints.task(projectId, taskId), {
           headers: {
             'X-Project-ID': projectId
           }
         }),
-        fetch(`/tasks/${projectId}/tasks/${taskId}/todos`, {
+        fetch(apiEndpoints.taskTodos(projectId, taskId), {
           headers: {
             'X-Project-ID': projectId
           }

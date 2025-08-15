@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Modal, Row, Col, Card, ListGroup, Badge, Spinner, Button } from 'react-bootstrap';
+import { apiEndpoints } from '../api/config';
 
 function TaskVersionModal({ show, handleClose, task, projectId }) {
   const [versions, setVersions] = useState([]);
@@ -18,7 +19,7 @@ function TaskVersionModal({ show, handleClose, task, projectId }) {
 
     setLoading(true);
     try {
-      const url = `/versions/${projectId}/tasks/${encodeURIComponent(taskId)}/versions`;
+      const url = `${apiEndpoints.task(projectId, encodeURIComponent(taskId))}/versions`;
       const response = await fetch(url, {
         headers: {
           'X-Project-ID': projectId,
@@ -54,7 +55,7 @@ function TaskVersionModal({ show, handleClose, task, projectId }) {
         return;
       }
 
-      const url = `/versions/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(taskId)}/revert?version_id=${encodeURIComponent(versionId)}`;
+      const url = `${apiEndpoints.task(projectId, encodeURIComponent(taskId))}/revert?version_id=${encodeURIComponent(versionId)}`;
       
       console.log('启动回滚:', { projectId, taskId, versionId });
       const response = await fetch(url, {

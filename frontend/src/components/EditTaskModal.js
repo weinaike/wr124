@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Form, Row, Col, Badge, Card } from 'react-bootstrap';
+import { apiEndpoints } from '../api/config';
 
 function EditTaskModal({ show, handleClose, task, projectId, onTaskUpdated }) {
   const [taskData, setTaskData] = useState({
@@ -33,7 +34,7 @@ function EditTaskModal({ show, handleClose, task, projectId, onTaskUpdated }) {
 
   const fetchAvailableTasks = async () => {
     try {
-      const response = await fetch(`/tasks/${projectId}/tasks`, {
+      const response = await fetch(apiEndpoints.tasks(projectId), {
         headers: {
           'X-Project-ID': projectId
         }
@@ -62,7 +63,7 @@ function EditTaskModal({ show, handleClose, task, projectId, onTaskUpdated }) {
     setSubmitting(true);
     try {
       const taskId = task._id || task.id;
-      const response = await fetch(`/tasks/${projectId}/tasks/${taskId}`, {
+      const response = await fetch(apiEndpoints.task(projectId, taskId), {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',

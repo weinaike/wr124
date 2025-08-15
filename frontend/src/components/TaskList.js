@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Table, Alert } from 'react-bootstrap';
+import { apiEndpoints } from '../api/config';
 
 function TaskList({ projectId, refreshTasks }) {
   const [tasks, setTasks] = useState([]);
@@ -11,7 +12,7 @@ function TaskList({ projectId, refreshTasks }) {
     const fetchTasks = async () => {
       setError(null);
       try {
-        const response = await fetch(`/tasks/${projectId}/tasks`, {
+        const response = await fetch(apiEndpoints.tasks(projectId), {
           headers: {
             'X-Project-ID': projectId
           }

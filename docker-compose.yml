@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - ~/mongo-data/:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=mcp_db
+    networks:
+      - shrimp-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  shrimp-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shrimp-app
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "4444:4444"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - DATABASE_NAME=mcp_test_db
+      - HOST=0.0.0.0
+      - PORT=4444
+      - DEBUG=false
+      - SECRET_KEY=your-super-secret-key-change-this-in-production
+    volumes:
+      - ./logs:/var/log
+    networks:
+      - shrimp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  shrimp-network:
+    driver: bridge

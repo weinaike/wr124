@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Modal, Row, Col, Card, ListGroup, Badge, Spinner } from 'react-bootstrap';
+import { apiEndpoints } from '../api/config';
 
 function TaskMemoryModal({ show, handleClose, task, projectId }) {
   const [memories, setMemories] = useState([]);
@@ -46,10 +47,10 @@ function TaskMemoryModal({ show, handleClose, task, projectId }) {
       let url;
       if (task && (task._id || task.id)) {
         // 任务级别记忆
-        url = `/memories/${projectId}/memories?task_id=${encodeURIComponent(task?._id || task?.id || '')}`;
+        url = `${apiEndpoints.memories(projectId)}?task_id=${encodeURIComponent(task?._id || task?.id || '')}`;
       } else {
         // 项目级别记忆
-        url = `/memories/${projectId}/memories`;
+        url = apiEndpoints.memories(projectId);
       }
       console.log('Fetching memories from:', url);
       const response = await fetch(url, {
@@ -82,7 +83,7 @@ function TaskMemoryModal({ show, handleClose, task, projectId }) {
     if (!taskId || !projectId) return null;
     
     try {
-      const response = await fetch(`/tasks/${projectId}/tasks/${taskId}`, {
+      const response = await fetch(apiEndpoints.task(projectId, taskId), {
         headers: {
           'X-Project-ID': projectId,
           'Content-Type': 'application/json'

@@ -6,7 +6,7 @@ from shrimp.db.database import db_manager
 router = APIRouter()
 
 
-@router.get("/")
+@router.get("/health")
 async def health_check():
     """Health check endpoint - verifies database connectivity."""
     try:

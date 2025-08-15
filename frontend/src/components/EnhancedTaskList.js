@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Card, Badge, Button, Alert, Spinner } from 'react-bootstrap';
+import { apiEndpoints } from '../api/config';
 
 const getStatusBadge = (status) => {
   const statusMap = {
@@ -24,7 +25,7 @@ function EnhancedTaskList({ projectId, refreshTasks }) {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`/tasks/${projectId}/tasks`, {
+        const response = await fetch(apiEndpoints.tasks(projectId), {
           headers: {
             'X-Project-ID': projectId
           }

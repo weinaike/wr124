@@ -5,6 +5,7 @@ import TaskTableView from './TaskTableView';
 import TaskDetailModal from './TaskDetailModal';
 import CreateTaskModal from './CreateTaskModal';
 import TaskMemoryModal from './TaskMemoryModal';
+import { apiEndpoints } from '../api/config';
 
 function UnifiedTaskManager() {
   const [selectedProject, setSelectedProject] = useState('default');
@@ -31,7 +32,7 @@ function UnifiedTaskManager() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`/tasks/${selectedProject}/tasks`, {
+      const response = await fetch(apiEndpoints.tasks(selectedProject), {
         headers: {
           'X-Project-ID': selectedProject
         }

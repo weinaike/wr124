@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Button, Form, Row, Col, Badge, Card } from 'react-bootstrap';
+import { apiEndpoints } from '../api/config';
 
 function CreateTaskModal({ show, handleClose, projectId, onTaskCreated }) {
   const [taskName, setTaskName] = useState('');
@@ -25,7 +26,7 @@ function CreateTaskModal({ show, handleClose, projectId, onTaskCreated }) {
 
   const fetchAvailableTasks = async () => {
     try {
-      const response = await fetch(`/tasks/${projectId}/tasks`, {
+      const response = await fetch(apiEndpoints.tasks(projectId), {
         headers: {
           'X-Project-ID': projectId
         }
@@ -69,7 +70,7 @@ function CreateTaskModal({ show, handleClose, projectId, onTaskCreated }) {
 
     setSubmitting(true);
     try {
-      const response = await fetch(`/tasks/${projectId}/tasks`, {
+      const response = await fetch(apiEndpoints.tasks(projectId), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

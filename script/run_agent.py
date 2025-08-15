@@ -9,9 +9,9 @@ current_dir = os.getcwd()
 sys.path.insert(0, str(current_dir))
 
 # Apply monkey patch for normalize_name issue
-sys.path.insert(0, '/home/wnk/code/wr124')
-from fix_normalize_name import apply_normalize_name_patch
-apply_normalize_name_patch()
+# sys.path.insert(0, '/home/wnk/code/wr124')
+# from fix_normalize_name import apply_normalize_name_patch
+# apply_normalize_name_patch()
 
 from wr124.team_base import Team
 from wr124.agent_base import BaseAgent

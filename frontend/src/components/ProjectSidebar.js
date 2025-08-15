@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ListGroup, Spinner, Alert, Button, Modal } from 'react-bootstrap';
+import { apiEndpoints } from '../api/config';
 
 function ProjectSidebar({ selectedProject, onProjectSelect, className = '' }) {
   const [projects, setProjects] = useState([]);
@@ -16,7 +17,7 @@ function ProjectSidebar({ selectedProject, onProjectSelect, className = '' }) {
   const fetchProjects = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/tasks/projects');
+      const response = await fetch(apiEndpoints.projects());
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -45,7 +46,7 @@ function ProjectSidebar({ selectedProject, onProjectSelect, className = '' }) {
     
     setDeleting(true);
     try {
-      const response = await fetch(`/tasks/project/${projectToDelete}`, {
+      const response = await fetch(apiEndpoints.project(projectToDelete), {
         method: 'DELETE',
         headers: {
           'X-Project-ID': projectToDelete
