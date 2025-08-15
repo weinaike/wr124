@@ -29,6 +29,36 @@ function TaskTableView({ tasks, projectId, onTasksRefreshed }) {
     setSelectedTask(null);
   };
 
+  const handleDeleteTask = async (task, event) => {
+    event.stopPropagation();
+    
+    if (!window.confirm(`确定要删除任务 "${task.name}" 吗？此操作不可恢复。`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/${projectId}/tasks/${task._id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Project-ID': projectId,
+        },
+      });
+
+      if (response.ok) {
+        if (onTasksRefreshed) {
+          await onTasksRefreshed();
+        }
+      } else {
+        const error = await response.json();
+        alert(`删除失败：${error.detail || error.message || '未知错误'}`);
+      }
+    } catch (error) {
+      console.error('删除任务时发生错误:', error);
+      alert(`删除失败：${error.message || '网络错误'}`);
+    }
+  };
+
   const getStatusBadge = (status) => {
     const statusMap = {
       pending: { bg: 'warning', text: '待处理' },
@@ -156,6 +186,15 @@ function TaskTableView({ tasks, projectId, onTasksRefreshed }) {
                         className="px-1 py-0"
                       >
                         <i className="bi bi-clock-history"></i>
+                      </Button>
+                      <Button 
+                        variant="outline-danger" 
+                        size="sm" 
+                        onClick={(e) => handleDeleteTask(task, e)}
+                        title="删除任务"
+                        className="px-1 py-0"
+                      >
+                        <i className="bi bi-trash"></i>
                       </Button>
                     </div>
                   </td>

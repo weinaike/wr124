@@ -3,6 +3,13 @@ import os
 import sys
 import asyncio
 from pathlib import Path
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.openai import OpenAIInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
 
 current_dir = os.getcwd()
 # 添加项目根目录到Python路径
@@ -28,80 +35,42 @@ from autogen_ext.tools.mcp import StdioServerParams, StreamableHttpServerParams,
 from wr124.filesystem import tool_mapping
 
 # Example usage
-async def main(task:str = "What is the weather today?"):
+async def main(task:str = "What is the weather today?", project_id:str = "default"):
+
+
+    # Set up telemetry span exporter.
+    otel_exporter = OTLPSpanExporter(endpoint="http://localhost:4317", insecure=True)
+    span_processor = BatchSpanProcessor(otel_exporter)
+
+    # Set up telemetry trace provider.
+    tracer_provider = TracerProvider(resource=Resource({"service.name": project_id}))
+    tracer_provider.add_span_processor(span_processor)
+    trace.set_tracer_provider(tracer_provider)
+
+    # Instrument the OpenAI Python library
+    OpenAIInstrumentor().instrument()
+    # we will get reference this tracer later using its service name
+    # tracer = trace.get_tracer("autogen-test-agentchat")
+    tracer = trace.get_tracer(project_id)
+
     print("Testing basic agent operation...")
     # Create team with MCP tools
     command_mcp_server = StreamableHttpServerParams(
-        url="http://localhost:4444/mcp",
-        headers={"Authorization": "Bearer YOUR_ACCESS_TOKEN", "X-Project-ID": "default"},
+        url="http://localhost/mcp",
+        headers={"Authorization": "Bearer YOUR_ACCESS_TOKEN", "X-Project-ID": project_id},
         sse_read_timeout = 3600,  # 设置SSE读取超时时间为1小时
-    )
-    
-    tools = list(tool_mapping.values())
+    ) 
 
-    team = Team(model="glm-4.5", mcp_tools=[command_mcp_server])#"kimi-k2-0711-preview"
-    # agent = BaseAgent(name="WorkerAgent", model_client=model_client, tools=tools)
+    team = Team(model="glm-4.5")#"kimi-k2-0711-preview"
+    await team.register_mcp_tools(command_mcp_server)
 
-    await Console(team.run_stream(task=task))
+    with tracer.start_as_current_span("run_team"):
+        await Console(team.run_stream(task=task))
 
 if __name__ == "__main__":
     # Run the main function
     load_dotenv("/home/wnk/code/wr124/script/.env")
-    print(os.environ)
-    task = '''
-  格努以下工具的描述，编写实际实现的方法。 即实现两个工具， TodoRead 和 TodoWrite。 用python实现，代码写入到/home/wnk/code/wr124/todo目录下
-  todo清单要求在工具内部实现持久化同步。 查询目录下的已有实现， 进行修正， 注意，要求接口函数符合一下格式要求。且两者要统一考虑，数据共享。
-
-  "TodoRead": {
-    "description": "Use this tool to read the current to-do list for the session. ",
-    "parameters": {
-      "$schema": &quot;http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "description": "No input is required, leave this field blank. NOTE that we do not require a dummy object, placeholder string or a key like \"input\" or \"empty\". LEAVE IT BLANK.",
-      "properties": {},
-      "type": "object"
-    }
-  },
-  "TodoWrite": {
-    "description": "Use this tool to create and manage a structured task list for your current coding session. \n",
-    "parameters": {
-      "$schema": &quot;http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "todos": {
-          "description": "The updated todo list",
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "content": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "id": {
-                "type": "string"
-              },
-              "priority": {
-                "enum": ["high", "medium", "low"],
-                "type": "string"
-              },
-              "status": {
-                "enum": ["pending", "in_progress", "completed"],
-                "type": "string"
-              }
-            },
-            "required": ["content", "status", "priority", "id"],
-            "type": "object"
-          },
-          "type": "array"
-        }
-      },
-      "required": ["todos"],
-      "type": "object"
-    }
-  },
-
-
-'''
-
-    task = "重点测试 query_memories 工具"
+    print(os.environ)    
+    
+    task = "请问你有多少工具可用"
     asyncio.run(main(task=task))

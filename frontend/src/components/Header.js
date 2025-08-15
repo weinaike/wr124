@@ -19,6 +19,17 @@ function Header() {
         <Navbar.Collapse id="basic-navbar-nav">
           <Nav className="ms-auto align-items-center">
             <Nav.Item className="me-3">
+              <Nav.Link 
+                href={`http://${window.location.hostname}:16686`}
+                target="_blank" 
+                className="text-light d-flex align-items-center"
+                title="打开 Jaeger 链路追踪"
+              >
+                <i className="bi bi-diagram-3 me-1"></i>
+                <span>Jaeger</span>
+              </Nav.Link>
+            </Nav.Item>
+            <Nav.Item className="me-3">
               <div className="nav-info">
                 <i className="bi bi-circle-fill text-success me-2" style={{ fontSize: '0.6rem' }}></i>
                 <span className="text-light">系统运行正常</span>

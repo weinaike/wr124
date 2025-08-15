@@ -49,7 +49,7 @@ def print_tools(tools: List[StdioMcpToolAdapter]) -> None:
         console.print("─" * 60 + "\n")
 
 class Team:
-    def __init__(self, model:str, mcp_tools:List[Union[StdioServerParams, StreamableHttpServerParams, SseServerParams]]):
+    def __init__(self, model:str):
         self._model_client = OpenAIChatCompletionClient(model=model, model_info=ModelInfo(
             vision=False,
             function_calling=True,
@@ -59,17 +59,14 @@ class Team:
         ))
 
         self._tools: dict[str, Any] = tool_mapping
-        self._mcp_tools = mcp_tools  # Store for later initialization
         self._sub_agents = []
         self._main_agent = None
 
     async def initialize(self):
         """Initialize MCP tools and main agent - must be called before use"""
-        for mcp_tool in self._mcp_tools:
-            await self._register_mcp_tools(mcp_tool)
         self._main_agent = self._create_agent(self._model_client, None, None)
 
-    async def _register_mcp_tools(self, param: Union[StdioServerParams, StreamableHttpServerParams, SseServerParams]):
+    async def register_mcp_tools(self, param: Union[StdioServerParams, StreamableHttpServerParams, SseServerParams]):
         tools = await mcp_server_tools(param)
         print_tools(tools)
         for tool in tools:
