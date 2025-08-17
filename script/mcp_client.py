@@ -1,5 +1,5 @@
 import asyncio
-from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.client.transports import StreamableHttpTransport, StdioTransport
 from fastmcp.client import Client
 from mcp.types import CallToolResult
 import json
@@ -24,6 +24,12 @@ def get_mcp_client(project_id: str, auth_token: str) -> Client:
             "X-Project-ID": project_id,
         }
     )
+    return Client(transport)
+
+def get_stdio_client() -> Client:
+    transport = StdioTransport(command="npx", 
+                               args=["-y","@adenot/mcp-google-search"]
+                            )
     return Client(transport)
 
 def get_result_data(result: CallToolResult):
@@ -51,11 +57,14 @@ async def main():
     """
     try:    
         client:Client = get_mcp_client(PROJECT_ID, AUTH_TOKEN)
-        client2:Client = get_mcp_client("test", AUTH_TOKEN)
+        client2:Client = get_stdio_client()
+        tools = await client2.list_tools()
+
+        print(tools)
 
         print(f"✅ Connecting to server at {SERVER_URL}...")
-    except:
-        print(f"❌ Could not connect to server at {SERVER_URL}")
+    except Exception as e:
+        print(f"❌ Could not connect to server at {SERVER_URL}: \n{e}")
         return
 
     async with client:

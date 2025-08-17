@@ -19,6 +19,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   shrimp-app:
     build:
@@ -49,22 +54,46 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   jaeger:
     image: jaegertracing/all-in-one:latest
     container_name: jaeger
     restart: unless-stopped
+    user: root  # 解决权限问题
     environment:
       - COLLECTOR_OTLP_ENABLED=true
+      - SPAN_STORAGE_TYPE=badger  # 使用badger进行持久化存储
+      - BADGER_EPHEMERAL=false   # 非临时存储，持久化数据
+      - BADGER_DIRECTORY_KEY=/badger/key
+      - BADGER_DIRECTORY_VALUE=/badger/data
+      - LOG_LEVEL=warn  # 减少日志输出
+    volumes:
+      - ~/jaeger-data:/badger  # 使用Docker卷进行持久化
     ports:
       - "16686:16686"   # UI
       - "4317:4317"     # OTLP gRPC
       - "4318:4318"     # OTLP HTTP
+      - "14268:14268"   # Jaeger Collector HTTP
+      - "14250:14250"   # Jaeger Collector gRPC
+      - "6831:6831/udp" # Jaeger Agent UDP
+      - "6832:6832/udp" # Jaeger Agent UDP      
     networks:
       - shrimp-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   mongodb_data:
+    driver: local
+  jaeger_badger:
     driver: local
 
 networks:

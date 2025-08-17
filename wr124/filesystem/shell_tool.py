@@ -23,8 +23,6 @@ class CommandExecutor:
         # 正确处理 ~ 路径展开
         if working_dir is None:
             self.working_dir = Path.cwd()
-        elif working_dir == "~":
-            self.working_dir = Path.home()
         else:
             # 使用 expanduser 来处理可能包含 ~ 的路径
             expanded_path = os.path.expanduser(working_dir)
