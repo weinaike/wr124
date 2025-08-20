@@ -7,10 +7,10 @@ import asyncio
 from pathlib import Path
 
 from autogen_core import CancellationToken
-from autogen_core.models import ChatCompletionClient
+from autogen_core.models import ChatCompletionClient, ModelInfo, ModelFamily
 from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, TextMessage
 from autogen_agentchat.base import TaskResult
-
+from autogen_ext.models.openai import OpenAIChatCompletionClient
 from rich.console import Console as RichConsole
 from pydantic import BaseModel, Field
 import yaml
@@ -185,7 +185,17 @@ class Team:
         system_prompt = f"{agent_param.prompt}\n{STOP_PROMPT}"
         
         tools = self._filter_tools_by_names(agent_param.tools)
-        
+        if agent_param.model:
+            self._model_client = OpenAIChatCompletionClient(
+                model=agent_param.model,
+                model_info=ModelInfo(
+                    vision=False,
+                    function_calling=True,
+                    json_output=True,
+                    family=ModelFamily.GPT_4O,
+                    structured_output=True,
+                )
+            )
         # 创建agent
         agent = BaseAgent(
             name=agent_param.name,
