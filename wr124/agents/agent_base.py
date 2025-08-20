@@ -9,7 +9,7 @@ from autogen_core import CancellationToken
 from autogen_core.models import ChatCompletionClient
 from autogen_core.tools import BaseTool
 from autogen_core.memory import Memory
-
+from autogen_core import CancellationToken, ComponentBase, trace_create_agent_span, trace_invoke_agent_span
 from autogen_core import CancellationToken
 from autogen_core.models import (
     FunctionExecutionResult,
@@ -23,7 +23,7 @@ try:
     from .prompt_compress import SUMMARY_HISTORY_SYSTEM_TEMPLATE
 except ImportError:
     # 当直接运行此文件时，使用绝对导入
-    from prompt_compress import SUMMARY_HISTORY_SYSTEM_TEMPLATE
+    from wr124.agents.prompt_compress import SUMMARY_HISTORY_SYSTEM_TEMPLATE
 
 
 STOP_PROMPT = '''
@@ -60,11 +60,13 @@ class BaseAgent(AssistantAgent):
             **kwargs,
         )
         self._temrminate_word = 'TERMINATE'
-        self._termination_condition = TextMentionTermination(self._temrminate_word) | ExternalTermination()
+        self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
         self._max_tokens = 100*1024   # 100K tokens
-
-
+    
+    @property
+    def tools(self):
+        return self._tools
 
     async def run(
         self,
@@ -72,18 +74,18 @@ class BaseAgent(AssistantAgent):
         cancellation_token: CancellationToken | None = None,
         output_task_messages: bool = True,
     ) -> TaskResult:
-        
-        result: TaskResult | None = None
-        async for message in self.run_stream(
-            task=task,
-            cancellation_token=cancellation_token,
-            output_task_messages=output_task_messages,
-        ):
-            if isinstance(message, TaskResult):
-                result = message
-        if result is not None:
-            return result
-        raise AssertionError("The stream should have returned the final result.")
+        with trace_invoke_agent_span(agent_name=self.name, agent_description=self.description):
+            result: TaskResult | None = None
+            async for message in self.run_stream(
+                task=task,
+                cancellation_token=cancellation_token,
+                output_task_messages=output_task_messages,
+            ):
+                if isinstance(message, TaskResult):
+                    result = message
+            if result is not None:
+                return result
+            raise AssertionError("The stream should have returned the final result.")
 
     async def run_stream(
         self,
@@ -93,76 +95,77 @@ class BaseAgent(AssistantAgent):
         output_task_messages: bool = True,
     ) -> AsyncGenerator[BaseAgentEvent | BaseChatMessage | TaskResult, None]:
     
-        if cancellation_token is None:
-            cancellation_token = CancellationToken()
-        input_messages: List[BaseChatMessage] = []
-        output_messages: List[BaseAgentEvent | BaseChatMessage] = []
-        if task is None:
-            pass
-        elif isinstance(task, str):
-            text_msg = TextMessage(content=task, source="user")
-            input_messages.append(text_msg)
-            if output_task_messages:
-                output_messages.append(text_msg)
-                yield text_msg
-        elif isinstance(task, BaseChatMessage):
-            input_messages.append(task)
-            if output_task_messages:
-                output_messages.append(task)
-                yield task
-        else:
-            if not task:
-                raise ValueError("Task list cannot be empty.")
-            for msg in task:
-                if isinstance(msg, BaseChatMessage):
-                    input_messages.append(msg)
-                    if output_task_messages:
-                        output_messages.append(msg)
-                        yield msg
-                else:
-                    raise ValueError(f"Invalid message type in sequence: {type(msg)}")
-                
-        models_usage = RequestUsage(0,0)
-        stop_reason: StopMessage | None = None
-        completed = False
-        while True:
-            if cancellation_token.is_cancelled():
-                stop_reason = "Cancelled by user"
-                break
-            if self._termination_condition.terminated or completed:
-                break
-            async for message in self.on_messages_stream(input_messages, cancellation_token):
-            
-                if isinstance(message, Response):
-                    yield message.chat_message
-                    output_messages.append(message.chat_message)
-
-                    # 统计token使用情况
-                    if message.chat_message.models_usage:
-                        models_usage = message.chat_message.models_usage
+        with trace_invoke_agent_span(agent_name=self.name, agent_description=self.description):
+            if cancellation_token is None:
+                cancellation_token = CancellationToken()
+            input_messages: List[BaseChatMessage] = []
+            output_messages: List[BaseAgentEvent | BaseChatMessage] = []
+            if task is None:
+                pass
+            elif isinstance(task, str):
+                text_msg = TextMessage(content=task, source="user")
+                input_messages.append(text_msg)
+                if output_task_messages:
+                    output_messages.append(text_msg)
+                    yield text_msg
+            elif isinstance(task, BaseChatMessage):
+                input_messages.append(task)
+                if output_task_messages:
+                    output_messages.append(task)
+                    yield task
+            else:
+                if not task:
+                    raise ValueError("Task list cannot be empty.")
+                for msg in task:
+                    if isinstance(msg, BaseChatMessage):
+                        input_messages.append(msg)
+                        if output_task_messages:
+                            output_messages.append(msg)
+                            yield msg
+                    else:
+                        raise ValueError(f"Invalid message type in sequence: {type(msg)}")
                     
-                    # 检查是否满足终止条件
-                    stop_message = await self._termination_condition([message.chat_message])
-                    if stop_message is not None:
-                        # Reset the termination conditions and turn count.
-                        await self._termination_condition.reset()
-                        completed = True
-                        break
-                else:
-                    yield message
-                    if isinstance(message, ModelClientStreamingChunkEvent):
-                        # Skip the model client streaming chunk events.
-                        continue
-                    output_messages.append(message)
+            models_usage = RequestUsage(0,0)
+            stop_reason: StopMessage | None = None
+            completed = False
+            while True:
+                if cancellation_token.is_cancelled():
+                    stop_reason = "Cancelled by user"
+                    break
+                if self._termination_condition.terminated or completed:
+                    break
+                async for message in self.on_messages_stream(input_messages, cancellation_token):
+                
+                    if isinstance(message, Response):
+                        yield message.chat_message
+                        output_messages.append(message.chat_message)
 
-            input_messages = []
+                        # 统计token使用情况
+                        if message.chat_message.models_usage:
+                            models_usage = message.chat_message.models_usage
+                        
+                        # 检查是否满足终止条件
+                        stop_message = await self._termination_condition([message.chat_message])
+                        if stop_message is not None:
+                            # Reset the termination conditions and turn count.
+                            await self._termination_condition.reset()
+                            completed = True
+                            break
+                    else:
+                        yield message
+                        if isinstance(message, ModelClientStreamingChunkEvent):
+                            # Skip the model client streaming chunk events.
+                            continue
+                        output_messages.append(message)
 
-            # 如果output_messages 计算token数量超过最大限制，则需要进行摘要，并将摘要作为新的输入
-            if models_usage.prompt_tokens > self._max_tokens:
-                input_messages = await self._compress_message(cancellation_token)
-               
+                input_messages = []
 
-        yield TaskResult(messages=output_messages, stop_reason=stop_reason)
+                # 如果output_messages 计算token数量超过最大限制，则需要进行摘要，并将摘要作为新的输入
+                if models_usage.prompt_tokens > self._max_tokens:
+                    input_messages = await self._compress_message(cancellation_token)
+                
+
+            yield TaskResult(messages=output_messages, stop_reason=stop_reason)
 
 
     async def _compress_message(self, cancellation_token: CancellationToken | None = None,):

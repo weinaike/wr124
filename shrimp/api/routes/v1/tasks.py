@@ -222,5 +222,5 @@ async def set_todos(
     if project_id != current_project:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    response = await task_service.set_todos(project_id, task_id, todos)
+    response = await task_service.set_todos(project_id, task_id, todos, notes="Updated todos via API")
     return handle_service_response(response)

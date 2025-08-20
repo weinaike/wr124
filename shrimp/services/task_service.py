@@ -435,7 +435,7 @@ class TaskService:
             # Check task status
             if task.status not in [TaskStatus.IN_PROGRESS, TaskStatus.PENDING]:
                 return ServiceResponse.error_response(
-                    f"Task {task.name} has status {task.status.value}, cannot verify"
+                    f"Task {task.name} has status {task.status.value}. only status 'in_progress' and 'pending' can verify"
                 )
             
             # Update based on score
@@ -449,8 +449,8 @@ class TaskService:
                 updated_task_response = await self.update_task(project_id, task_id, task_update)
                 if not updated_task_response.success:
                     return updated_task_response
-                
-                updated_task_response.message = f"Task {task.name} completed successfully"
+
+                updated_task_response.message = f"Task {task.name} completed successfully. next work is using `add_memory` to record it."
                 return updated_task_response
             else:
                 # Task needs improvement - set to in_progress if pending
@@ -462,7 +462,7 @@ class TaskService:
                 
                 return ServiceResponse.success_response(
                     task,
-                    f"Task {task.name} needs improvement (score: {score}/100)"
+                    f"Task {task.name} needs improvement (score: {score}/100), please using todo_write append new todos for remaining issues"
                 )
                 
         except Exception as e:
@@ -588,7 +588,7 @@ class TaskService:
         except Exception as e:
             return ServiceResponse.error_response(f"Failed to get todos: {str(e)}")
     
-    async def set_todos(self, project_id: str, task_id: str, todos: List[TodoItem], changed_by: str = "system") -> ServiceResponse[List[Dict[str, Any]]]:
+    async def set_todos(self, project_id: str, task_id: str, todos: List[TodoItem], notes:str, changed_by: str = "system") -> ServiceResponse[List[Dict[str, Any]]]:
         """Set todos for a specific task."""
         try:
             # Validate task ID format
@@ -629,7 +629,8 @@ class TaskService:
                 {
                     "$set": {
                         "todos": validated_todos,
-                        "updated_at": datetime.now(timezone.utc)
+                        "updated_at": datetime.now(timezone.utc),
+                        "notes": notes
                     }
                 }
             )
@@ -644,7 +645,7 @@ class TaskService:
                     task_id=task_id,
                     operation="update",
                     changed_by=changed_by,
-                    message="Todos updated"
+                    message=f"Todos updated. Notes: {notes}"
                 )
             except Exception as e:
                 print(f"Warning: Failed to create version for todos update of task {task_id}: {str(e)}")

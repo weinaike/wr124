@@ -41,8 +41,9 @@ class MCPToolResponse:
     @staticmethod
     def error(
         operation: str,
-        error_message: str,
+        error_message: str,        
         error_code: Optional[str] = None,
+        message: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """创建错误响应
@@ -60,7 +61,7 @@ class MCPToolResponse:
             "success": False,
             "operation": operation,
             "data": None,
-            "message": None,
+            "message": message,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "metadata": metadata or {},
             "error": {
