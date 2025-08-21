@@ -8,7 +8,9 @@ WR124 是一个现代化的智能体任务管理系统，由三个核心组件�
 
 - **wr124/** - AI 智能体核心框架，基于 AutoGen 的先进智能体系统
 - **shrimp/** - MCP（Model Context Protocol）任务管理服务，提供 REST API 和 MCP 协议支持  
+  - 🔗 独立代码库：[weinaike/shrimp-backend](https://github.com/weinaike/shrimp-backend)
 - **frontend/** - React 前端应用，提供直观的任务管理界面
+  - 🔗 独立代码库：[weinaike/shrimp-frontend](https://github.com/weinaike/shrimp-frontend)
 
 ## ✨ 核心特性
 
@@ -52,13 +54,13 @@ wr124/
 │   ├── agent_plan.py        # 任务规划器
 │   ├── filesystem/          # 文件系统工具
 │   └── prompt_*.py          # 提示词模板
-├── shrimp/                   # MCP 任务管理服务
+├── shrimp/                   # MCP 任务管理服务 (Git 子模块)
 │   ├── main.py              # 服务端入口
 │   ├── api/                 # REST API 路由
 │   ├── services/            # 业务逻辑层
 │   ├── models/              # 数据模型
 │   └── tools/               # MCP 工具定义
-├── frontend/                 # React 前端应用
+├── frontend/                 # React 前端应用 (Git 子模块)
 │   ├── src/App.js           # 主应用组件
 │   ├── src/components/      # UI 组件库
 │   └── package.json         # 前端依赖配置
@@ -69,6 +71,15 @@ wr124/
 ```
 
 ## 🚀 快速开始
+
+> **注意**：`shrimp/` 和 `frontend/` 目录是 Git 子模块，分别对应独立的代码库。如需克隆完整项目，请使用：
+> ```bash
+> git clone --recursive https://github.com/weinaike/wr124.git
+> # 或者克隆后初始化子模块
+> git clone https://github.com/weinaike/wr124.git
+> cd wr124
+> git submodule update --init --recursive
+> ```
 
 ### 环境要求
 
