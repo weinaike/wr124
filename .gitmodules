@@ -1,0 +1,6 @@
+[submodule "shrimp"]
+	path = shrimp
+	url = git@github.com:weinaike/shrimp-backend.git
+[submodule "frontend"]
+	path = frontend
+	url = git@github.com:weinaike/shrimp-frontend.git
