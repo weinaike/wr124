@@ -9,30 +9,44 @@ import sys
 import os
 import subprocess
 
+# 延迟导入终端管理器，避免循环导入
+def _get_terminal_manager():
+    """延迟获取终端管理器实例"""
+    try:
+        from .terminal_manager import TerminalManager
+        return TerminalManager.get_instance()
+    except ImportError:
+        return None
+
 
 def ensure_terminal_ready_for_input():
     """确保终端准备好接收输入，特别是中文字符"""
-    try:
-        # 设置终端为标准模式
-        subprocess.run(['stty', 'echo', 'icanon'], 
-                     check=False, stderr=subprocess.DEVNULL, timeout=2)
-        
-        # 设置UTF-8编码
-        os.environ['LANG'] = os.environ.get('LANG', 'en_US.UTF-8')
-        os.environ['LC_ALL'] = os.environ.get('LC_ALL', 'en_US.UTF-8')
-        
-        # 重新配置标准输入输出的编码
-        if hasattr(sys.stdout, 'reconfigure'):
-            sys.stdout.reconfigure(encoding='utf-8')
-        if hasattr(sys.stdin, 'reconfigure'):
-            sys.stdin.reconfigure(encoding='utf-8')
-            
-    except Exception:
-        # 备用方案
+    terminal_manager = _get_terminal_manager()
+    if terminal_manager:
+        terminal_manager.ensure_terminal_ready_for_input()
+    else:
+        # 降级处理：如果没有终端管理器，使用原始方法
         try:
-            os.system('stty sane 2>/dev/null')
-        except:
-            pass
+            # 设置终端为标准模式
+            subprocess.run(['stty', 'echo', 'icanon'], 
+                         check=False, stderr=subprocess.DEVNULL, timeout=2)
+            
+            # 设置UTF-8编码
+            os.environ['LANG'] = os.environ.get('LANG', 'en_US.UTF-8')
+            os.environ['LC_ALL'] = os.environ.get('LC_ALL', 'en_US.UTF-8')
+            
+            # 重新配置标准输入输出的编码
+            if hasattr(sys.stdout, 'reconfigure'):
+                sys.stdout.reconfigure(encoding='utf-8')
+            if hasattr(sys.stdin, 'reconfigure'):
+                sys.stdin.reconfigure(encoding='utf-8')
+                
+        except Exception:
+            # 备用方案
+            try:
+                os.system('stty sane 2>/dev/null')
+            except:
+                pass
 
 
 def safe_input(prompt: str) -> str:
@@ -100,7 +114,6 @@ async def default_user_input_callback() -> tuple[str, str | None]:
                 
     except (KeyboardInterrupt, EOFError):
         print("\n\n用户中断，退出程序。")
-        return ('exit', None)
         return ('exit', None)
 
 def print_tools(tools: List[StdioMcpToolAdapter|Callable]) -> None:

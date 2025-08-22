@@ -22,24 +22,16 @@ from wr124.interactive_team import InteractiveTeam
 from wr124.agents.team_base import Team
 from wr124.telemetry_setup import TelemetrySetup
 from wr124.util import print_tools_info
+from wr124.terminal_manager import TerminalManager  # 导入终端管理器
 from autogen_agentchat.ui import Console
 from wr124.filesystem import tool_mapping
 
 
-def ensure_clean_terminal():
-    """确保终端处于干净状态"""
-    try:
-        import subprocess
-        subprocess.run(['stty', 'echo', 'icanon'], 
-                     check=False, stderr=subprocess.DEVNULL)
-    except:
-        pass
-
-
 async def main():
     """主函数 - 重构版本，支持AgentParam配置"""
-    # 确保终端处于正确状态
-    ensure_clean_terminal()
+    # 立即初始化终端管理器，确保终端状态被保存
+    terminal_manager = TerminalManager.get_instance()
+    
     session_id = str(uuid.uuid4())
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="运行Agent，执行指定任务。")
@@ -130,7 +122,8 @@ async def main():
             # 清理键盘监听器并恢复终端状态（仅对InteractiveTeam）
             if hasattr(execution_team, 'stop_keyboard_listener'):
                 execution_team.stop_keyboard_listener()
-            ensure_clean_terminal()
+            # 使用终端管理器恢复终端状态
+            terminal_manager.restore_terminal()
             
     except Exception as e:
         console.print(f"[red]程序执行出错: {e}[/red]")
@@ -139,7 +132,7 @@ async def main():
             console.print("[red]详细错误信息:[/red]")
             console.print(traceback.format_exc())
         # 确保即使出错也恢复终端状态
-        ensure_clean_terminal()
+        terminal_manager.restore_terminal()
         raise
 
 

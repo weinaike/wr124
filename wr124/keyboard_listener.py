@@ -12,6 +12,7 @@ import subprocess
 from typing import Callable, Optional
 from autogen_core import CancellationToken
 from rich.console import Console as RichConsole
+from .terminal_manager import TerminalManager
 
 
 class AsyncKeyboardListener:
@@ -116,6 +117,7 @@ class SimpleKeyboardListener:
         self._cancellation_source: Optional[CancellationToken] = None
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._terminal_manager = TerminalManager.get_instance()
         
     def set_cancellation_token(self, cancellation_token: CancellationToken):
         """设置要触发的取消令牌"""
@@ -135,7 +137,7 @@ class SimpleKeyboardListener:
         """在独立线程中监听键盘"""
         old_settings = None
         try:
-            # 保存原始终端设置
+            # 保存当前终端设置（仅在监听期间）
             old_settings = termios.tcgetattr(sys.stdin)
             # 使用cbreak模式而不是raw模式，保留一些终端功能
             tty.setcbreak(sys.stdin.fileno())
@@ -151,7 +153,7 @@ class SimpleKeyboardListener:
                         self.console.print("\n[yellow]⏸️  检测到 ESC 键，正在中断任务...[/yellow]")
                         if self._cancellation_source:
                             self._cancellation_source.cancel()
-                        # 立即开始恢复终端状态
+                        # 立即恢复终端设置
                         self._restore_terminal_settings(old_settings)
                         break
                         
@@ -174,41 +176,12 @@ class SimpleKeyboardListener:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         
-        # 立即强制恢复终端设置
-        self._force_restore_terminal()
+        # 确保终端恢复到正常状态
+        self._terminal_manager.ensure_terminal_ready_for_input()
         
         # 额外等待一小段时间确保终端状态稳定
         import time
         time.sleep(0.1)
-    
-    def _force_restore_terminal(self):
-        """强制恢复终端到正常状态"""
-        try:
-            # 方法1: 直接恢复到正常模式
-            import subprocess
-            subprocess.run(['stty', 'echo', 'icanon'], check=False, stderr=subprocess.DEVNULL)
-            # 额外确保终端完全恢复
-            subprocess.run(['stty', 'sane'], check=False, stderr=subprocess.DEVNULL)
-        except:
-            try:
-                # 方法2: 使用系统命令重置终端
-                os.system('stty sane 2>/dev/null')
-            except:
-                try:
-                    # 方法3: 尝试使用termios直接设置
-                    attrs = termios.tcgetattr(sys.stdin)
-                    attrs[3] |= (termios.ECHO | termios.ICANON)  # 启用回显和标准输入处理
-                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, attrs)
-                except:
-                    pass
-        
-        # 额外步骤：发送终端重置序列
-        try:
-            # 发送ANSI重置序列
-            sys.stdout.write('\033c')  # 完全重置终端
-            sys.stdout.flush()
-        except:
-            pass
     
     def _restore_terminal_settings(self, old_settings):
         """恢复终端设置的辅助方法"""
@@ -220,5 +193,5 @@ class SimpleKeyboardListener:
                 attrs[3] |= termios.ECHO  # 确保回显开启
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, attrs)
             except:
-                # 如果直接恢复失败，使用强制恢复
-                self._force_restore_terminal()
+                # 如果直接恢复失败，使用终端管理器恢复
+                self._terminal_manager.ensure_terminal_ready_for_input()

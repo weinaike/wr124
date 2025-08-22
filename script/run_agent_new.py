@@ -19,8 +19,9 @@ from wr124.config_manager import ConfigManager
 from wr124.tool_manager import ToolManager
 from wr124.interaction_handler import InteractionHandler
 from wr124.telemetry_setup import TelemetrySetup
-from wr124.team_base_new import Team
+from wr124.agents.team_base import Team
 from wr124.util import print_tools_info
+from wr124.terminal_manager import TerminalManager  # 导入终端管理器
 from autogen_agentchat.ui import Console
 from wr124.filesystem import tool_mapping
 
@@ -31,6 +32,9 @@ class AgentRunner:
     def __init__(self, args):
         self.args = args
         self.console = RichConsole()
+        
+        # 立即初始化终端管理器，确保终端状态被保存
+        self.terminal_manager = TerminalManager.get_instance()
         
         # 初始化各个管理器
         self.config_manager = ConfigManager(

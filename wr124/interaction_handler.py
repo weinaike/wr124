@@ -7,6 +7,7 @@ from autogen_core import CancellationToken
 from rich.console import Console as RichConsole
 from .util import default_user_input_callback
 from .keyboard_listener import SimpleKeyboardListener
+from .terminal_manager import TerminalManager
 
 
 class InteractionHandler:
@@ -18,6 +19,7 @@ class InteractionHandler:
         self._keyboard_listener: Optional[SimpleKeyboardListener] = None
         self._console = RichConsole()
         self._keyboard_listener_was_active = False  # 用于跟踪键盘监听器状态
+        self._terminal_manager = TerminalManager.get_instance()  # 获取终端管理器
     
     def enable_interactive_mode(self, use_default_callback: bool = True) -> None:
         """
@@ -87,37 +89,7 @@ class InteractionHandler:
     
     def _ensure_terminal_input_ready(self) -> None:
         """确保终端准备好接收正常输入，特别是支持中文字符"""
-        try:
-            import subprocess
-            import sys
-            # 设置终端为标准输入模式，支持回显和行缓冲
-            subprocess.run(['stty', 'echo', 'icanon'], 
-                         check=False, stderr=subprocess.DEVNULL)
-            # 额外确保终端完全恢复
-            subprocess.run(['stty', 'sane'], 
-                         check=False, stderr=subprocess.DEVNULL)
-            
-            # 确保终端编码设置正确
-            if hasattr(sys.stdout, 'reconfigure'):
-                sys.stdout.reconfigure(encoding='utf-8')
-            if hasattr(sys.stdin, 'reconfigure'):
-                sys.stdin.reconfigure(encoding='utf-8')
-                
-        except Exception:
-            # 如果上述方法失败，尝试基本的终端重置
-            try:
-                import os
-                os.system('stty sane 2>/dev/null')
-            except:
-                pass
-        
-        # 发送终端重置序列
-        try:
-            import sys
-            sys.stdout.write('\033[0m')  # 重置终端属性
-            sys.stdout.flush()
-        except:
-            pass
+        self._terminal_manager.ensure_terminal_ready_for_input()
     
     async def get_initial_task(self, task: Optional[str]) -> Optional[str]:
         """
