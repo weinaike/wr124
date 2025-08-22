@@ -26,6 +26,9 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY shrimp/ ./shrimp/
 
+RUN pip config set global.index-url http://mirrors.aliyun.com/pypi/simple/ && \
+    pip config set global.trusted-host mirrors.aliyun.com 
+
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e .

@@ -86,16 +86,27 @@ class InteractiveTeam:
                 self._console.print("\n[yellow]⏸️  检测到任务中断信号[/yellow]")
             else:
                 # 执行当前任务
-                async for msg in self.team.run_stream(
-                    task=current_task,
-                    cancellation_token=current_cancellation_token,
-                    output_task_messages=output_task_messages
-                ):
-                    yield msg
-                    # 在消息处理过程中再次检查取消状态
-                    if current_cancellation_token and current_cancellation_token.is_cancelled():
+                try:
+                    async for msg in self.team.run_stream(
+                        task=current_task,
+                        cancellation_token=current_cancellation_token,
+                        output_task_messages=output_task_messages
+                    ):
+                        yield msg
+                        # 在消息处理过程中再次检查取消状态
+                        if current_cancellation_token and current_cancellation_token.is_cancelled():
+                            task_was_cancelled = True
+                            break
+                except Exception as e:
+                    # 处理MCP流式调用可能的异常
+                    exception_name = type(e).__name__
+                    if exception_name in ['BrokenResourceError', 'ClosedResourceError', 'CancelledError']:
+                        # 这些异常通常由ESC键中断引起
+                        self._console.print(f"[yellow]⏸️  任务执行被中断 ({exception_name})[/yellow]")
                         task_was_cancelled = True
-                        break
+                    else:
+                        # 其他异常正常抛出
+                        raise
             
             # 如果任务被取消或正常完成，进入交互处理
             if task_was_cancelled:

@@ -606,20 +606,12 @@ async def list_directory(path: Annotated[str, "The directory path to list"] = ".
 
 
 async def read_file(file_path: Annotated[str, "The file path to read"], 
-                    start_line: int = 1, 
-                    end_line: int = None, 
-                    encoding: str = "utf-8", 
-                    show_line_numbers: bool = True) -> Dict[str, Any]:
+                    start_line: Annotated[int, "The starting line number (1-based)"] = 1, 
+                    end_line: Annotated[int, "The ending line number (1-based)"] = None, 
+                    encoding: Annotated[str, "The file encoding"] = "utf-8", 
+                    show_line_numbers: Annotated[bool, "Whether to show line numbers"] = True) -> Dict[str, Any]:
     """
     读取文件内容, 支持指定行范围(从1开始)；对于大文件，建议使用分页读取；
-    Args:
-        file_path (str): 文件绝对路径
-        start_line (int): 起始行号，默认1（包含）
-        end_line (int): 结束行号，默认None（读取到文件末尾，包含）
-        encoding (str): 文件编码，默认utf-8
-        show_line_numbers (bool): 是否显示行号，默认True
-    Returns:
-        Dict[str, Any]: 文件内容或错误信息的字典
     """
     executor = CommandExecutor()
     try:
@@ -706,13 +698,6 @@ async def write_file(file_path: Annotated[str, "The file path to write"],
                      ) -> Dict[str, Any]:
     """
     写入文件内容
-    调用回传参数时，arguments='{"file_path": file_path, "content": content, "encoding": encoding, "explanation": explanation}'要注意括号完整，转义正确
-    Args:
-        file_path (str): 文件具体对路径
-        content (str): 文件内容
-        encoding (str): 文件编码，默认utf-8
-    Returns:
-        Dict[str, Any]: 操作结果的字典
     """
     try:
         executor = CommandExecutor()
@@ -742,8 +727,6 @@ async def write_file(file_path: Annotated[str, "The file path to write"],
 async def get_environment() -> Dict[str, Any]:
     """
     获取详细的环境信息，包括系统信息、编译工具版本、硬件信息等
-    Returns:
-        Dict[str, Any]: 环境信息的字典
     """
     try:
         executor = CommandExecutor()
@@ -827,13 +810,6 @@ async def glob_search(pattern: Annotated[str, "The glob pattern to search for, e
                       ) -> str:
     """
     使用glob模块在指定路径下查找匹配的文件或目录。
-    Args:
-        pattern (str): 匹配模式，如 '*.py'、'**/*.cpp' 等。
-        path (str): 搜索的起始目录，默认为当前目录。
-    Returns:
-        list: 匹配到的文件或目录的绝对路径列表。
-    Example:
-        glob_search('*.py', '/home/user/project')
     """
 
     search_path = os.path.join(path, pattern)

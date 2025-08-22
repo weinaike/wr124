@@ -93,6 +93,9 @@ class InteractionHandler:
             # 设置终端为标准输入模式，支持回显和行缓冲
             subprocess.run(['stty', 'echo', 'icanon'], 
                          check=False, stderr=subprocess.DEVNULL)
+            # 额外确保终端完全恢复
+            subprocess.run(['stty', 'sane'], 
+                         check=False, stderr=subprocess.DEVNULL)
             
             # 确保终端编码设置正确
             if hasattr(sys.stdout, 'reconfigure'):
@@ -107,6 +110,14 @@ class InteractionHandler:
                 os.system('stty sane 2>/dev/null')
             except:
                 pass
+        
+        # 发送终端重置序列
+        try:
+            import sys
+            sys.stdout.write('\033[0m')  # 重置终端属性
+            sys.stdout.flush()
+        except:
+            pass
     
     async def get_initial_task(self, task: Optional[str]) -> Optional[str]:
         """

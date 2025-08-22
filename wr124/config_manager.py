@@ -14,9 +14,12 @@ from autogen_core.models import ModelFamily, ModelInfo
 class ConfigManager:
     """配置管理器"""
     
-    def __init__(self, env_file: Optional[str] = None, project_id: Optional[str] = None):
+    def __init__(self, session_id: Optional[str],
+                 env_file: Optional[str] = None, 
+                 project_id: Optional[str] = None):
         self.project_id = project_id or self._get_default_project_id()
         self.env_file = env_file or "./script/.env"
+        self.session_id = session_id
         self._load_environment()
         
     def _get_default_project_id(self) -> str:
@@ -39,6 +42,7 @@ class ConfigManager:
                 json_output=True,
                 family=ModelFamily.GPT_4O,
                 structured_output=True,
+                multiple_system_messages=True,
             )
         )
     
@@ -51,7 +55,8 @@ class ConfigManager:
             url="http://localhost/mcp",
             headers={
                 "Authorization": os.getenv("SHRIMP_AUTH_TOKEN", ""), 
-                "X-Project-ID": self.project_id
+                "X-Project-ID": self.project_id,
+                "X-Session-ID": self.session_id,
             },
             sse_read_timeout=3600,
         )

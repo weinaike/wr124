@@ -101,7 +101,7 @@ class Team:
         """加载默认的智能体配置"""
         try:
             # 默认使用 general_assistant.md
-            default_config_path = Path(__file__).parent / "config" / "general_assistant.md"
+            default_config_path = Path(__file__).parent / "preset_agents" / "general_assistant.md"
             if default_config_path.exists():
                 self._default_agent_config = parse_agent_markdown(str(default_config_path))
                 self._console.print(f"[dim]✓ 加载默认智能体配置: {self._default_agent_config.name}[/dim]")
@@ -257,12 +257,10 @@ class Team:
         """
         if not self._main_agent:
             raise RuntimeError("Agent not initialized. Call set_main_agent() first.")
-        
-        task_with_prompt = str(task) + '\n**所有任务完成后，输入结束关键词。注意：仅当所有任务结束才输出，其他情况继续执行任务。**'
-        
+                
         try:
             async for msg in self._main_agent.run_stream(
-                task=task_with_prompt,
+                task=task,
                 cancellation_token=cancellation_token,
                 output_task_messages=output_task_messages
             ):
@@ -274,7 +272,13 @@ class Team:
             return
         except Exception as e:
             # 处理其他可能的异常
-            self._console.print(f"[red]⚠️  任务执行时发生异常: {e}[/red]")
+            # 检查是否是重试失败后的包装异常
+            error_msg = str(e)
+            if "Failed after" in error_msg and "attempts" in error_msg:
+                # 这是来自底层重试机制的异常，提取原始错误信息
+                self._console.print(f"[red]⚠️  任务执行失败（已重试）: {error_msg}[/red]")
+            else:
+                self._console.print(f"[red]⚠️  任务执行时发生异常: {e}[/red]")
             yield TextMessage(content=f"任务执行异常: {str(e)}", source="system")
             return
     

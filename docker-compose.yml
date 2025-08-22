@@ -11,6 +11,7 @@ services:
       - ~/mongo-data/:/data/db
     environment:
       - MONGO_INITDB_DATABASE=mcp_db
+      - TZ=Asia/Shanghai
     networks:
       - shrimp-network
     healthcheck:
@@ -38,6 +39,7 @@ services:
       mongodb:
         condition: service_healthy
     environment:
+      - TZ=Asia/Shanghai
       - MONGO_URI=mongodb://mongodb:27017
       - DATABASE_NAME=mcp_test_db
       - HOST=0.0.0.0
@@ -66,6 +68,7 @@ services:
     restart: unless-stopped
     user: root  # 解决权限问题
     environment:
+      - TZ=Asia/Shanghai
       - COLLECTOR_OTLP_ENABLED=true
       - SPAN_STORAGE_TYPE=badger  # 使用badger进行持久化存储
       - BADGER_EPHEMERAL=false   # 非临时存储，持久化数据

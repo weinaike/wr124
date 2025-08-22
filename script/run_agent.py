@@ -40,7 +40,7 @@ async def main():
     """主函数 - 重构版本，支持AgentParam配置"""
     # 确保终端处于正确状态
     ensure_clean_terminal()
-    
+    session_id = str(uuid.uuid4())
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="运行Agent，执行指定任务。")
     parser.add_argument("-t", "--task", type=str, help="要执行的任务（如未提供，将启用交互模式）")
@@ -52,7 +52,7 @@ async def main():
     args = parser.parse_args()
     
     console = RichConsole()
-    
+
     # 处理 project_id：如果未提供，使用当前目录名
     if args.project_id is None:
         current_path = Path.cwd()
@@ -61,7 +61,9 @@ async def main():
     
     try:
         # 初始化配置管理器
-        config_manager = ConfigManager(env_file=args.env_file, project_id=args.project_id)
+        config_manager = ConfigManager(session_id=session_id, 
+                                       env_file=args.env_file, 
+                                       project_id=args.project_id)
         
         # 初始化遥测
         telemetry = TelemetrySetup(config_manager.project_id)
@@ -80,7 +82,7 @@ async def main():
             print_tools_info(tools, debug=True)
         
         # 创建模型客户端
-        model_client = config_manager.get_model_client()
+        model_client = config_manager.get_model_client("glm-4.5")
         
         # 创建Team实例
         team = Team(model_client)
@@ -118,8 +120,8 @@ async def main():
         
         try:
             # 执行任务
-            session_id = uuid.uuid4()
-            with tracer.start_as_current_span(name=str(session_id)):
+
+            with tracer.start_as_current_span(name=session_id):
                 await Console(execution_team.run_stream(
                     task=args.task,
                     cancellation_token=cancellation_token

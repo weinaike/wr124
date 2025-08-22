@@ -2,6 +2,8 @@
 工具管理模块
 负责MCP工具的注册、验证和管理
 """
+import traceback
+import sys
 from typing import Dict, Any, Union, Callable
 from autogen_ext.tools.mcp import (
     StdioServerParams, 
@@ -50,6 +52,7 @@ class ToolManager:
                     self._tools[tool_name] = tool
             except Exception as e:
                 self._console.print(f"[red]⚠️  注册工具失败: {e}[/red]")
+                traceback.print_exc()
                 
         return self._tools
     

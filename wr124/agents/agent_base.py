@@ -1,5 +1,6 @@
 import os
 import asyncio
+import traceback
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.agents import AssistantAgent
 from typing import Any, Awaitable, Callable, List, Mapping, Sequence, AsyncGenerator, Union, Optional
@@ -9,16 +10,20 @@ from autogen_agentchat.conditions import TextMentionTermination, ExternalTermina
 from autogen_core import CancellationToken
 from autogen_core.models import ChatCompletionClient
 from autogen_core.tools import BaseTool
-from autogen_core.memory import Memory
+from autogen_core.memory import Memory, ListMemory, MemoryContent
 from autogen_core import CancellationToken, ComponentBase, trace_create_agent_span, trace_invoke_agent_span
 from autogen_core import CancellationToken
+from autogen_core.model_context import UnboundedChatCompletionContext
 from autogen_core.models import (
     FunctionExecutionResult,
     LLMMessage,
     RequestUsage,
     UserMessage,
+    SystemMessage,
     AssistantMessage
 )
+from rich.console import Console
+
 # 处理相对导入问题 - 支持直接运行和作为模块导入
 try:
     from .prompt_compress import SUMMARY_HISTORY_SYSTEM_TEMPLATE
@@ -28,16 +33,29 @@ except ImportError:
     from wr124.agents.prompt_compress import SUMMARY_HISTORY_SYSTEM_TEMPLATE
     from wr124.agents.memory_recorder import MemoryRecorder
 
+KEYWORD = "_I_HAVE_COMPLETED_"
 
-STOP_PROMPT = '''
+STOP_PROMPT = f'''
+## This is very important
+When the assigned tasks are completed and there is no other work to execute, output the termination keyword.
+Our termination keyword is: `{KEYWORD}`
 
-## 这一点非常重要
-当然安排的任务已经完成，并且没有其他工作需要执行，输出结束关键词。
-我们的结束关键词是：`TERMINATE`
-
-这个关键词非常重要，可以避免你持续输出相同的内容
+This keyword is very important as it prevents you from continuously outputting the same content.
+'''
+NOTE_PROMPT = f'''
+This is a note: It is not part of the task but can guide your work.
+1. Remembering your task goals or to-do goals is very important as it can guide your direction and prevent you from deviating.
+2. When you are unsure about the next step, you can use `todo_read` or `list_tasks` to understand the task progress.
+3. After completing a task or to-do, remember to update the task status.
+4. Once all tasks are completed, enter the termination keyword. Note: Only output it when all tasks are finished; otherwise, continue executing tasks.
+To reiterate, this message is just a note. When you have a clear task to execute, you should choose to ignore it.
 '''
 
+class NoSystemUnboundedChatCompletionContext(UnboundedChatCompletionContext):
+    """不包含系统消息的无界聊天上下文"""
+    def remove_system_messages(self) -> None:
+        """移除系统消息"""
+        self._messages = [msg for msg in self._messages if not isinstance(msg, SystemMessage)]
 
 class BaseAgent(AssistantAgent):
     component_provider_override = "BaseAgent"
@@ -50,23 +68,38 @@ class BaseAgent(AssistantAgent):
         tools: List[BaseTool[Any, Any] | Callable[..., Any] | Callable[..., Awaitable[Any]]] | None = None,
         reflect_on_tool_use: bool | None = None,
         memory: Sequence[Memory] | None = None,
-        enable_memory_recording: bool = True,
+        enable_memory_recording: bool = False,
         **kwargs,
     ) -> None:
+       
+        note = MemoryContent(content=NOTE_PROMPT, mime_type="text/plain")
+        note_memory = ListMemory(memory_contents=[note])
+        if memory:
+            if isinstance(memory, list):  # 确保 memory 是 List 类型
+                memory.append(note_memory)
+            else:
+                memory = list(memory) + [note_memory]  # 转换为 List 并添加元素
+        else:
+            memory = [note_memory]
+        
         super().__init__(
             name,
             model_client,
+            model_context=NoSystemUnboundedChatCompletionContext(),
             description=description,
             system_message=system_message,
             tools=tools,
             reflect_on_tool_use=reflect_on_tool_use,
-            memory=memory,
+            memory=memory,            
             **kwargs,
         )
-        self._temrminate_word = 'TERMINATE'
+        self._temrminate_word = KEYWORD
         self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
         self._max_tokens = 100*1024   # 100K tokens
+        
+        # Rich console for beautiful output
+        self._console = Console()
         
         # 记忆记录功能
         self._enable_memory_recording = enable_memory_recording
@@ -203,6 +236,56 @@ class BaseAgent(AssistantAgent):
                 # 清理记忆任务
                 await self._cleanup_memory_task()
 
+    async def on_messages_stream(self, input_messages: list[BaseChatMessage], cancellation_token: CancellationToken | None = None
+                                 )-> AsyncGenerator[Union[BaseAgentEvent, BaseChatMessage, Response], None]:
+        """
+        处理消息流，添加异常处理和重试机制
+        最多重试5次，每次间隔递增的等待时间
+        """
+        max_retries = 3
+        retry_delay = 1  # 初始延迟2秒
+        
+        for attempt in range(max_retries + 1):  # 包含初始尝试，总共6次机会
+            try:
+                async for message in super().on_messages_stream(input_messages, cancellation_token):
+                    yield message
+                # 如果成功处理完所有消息，直接返回
+                # self._model_context中添加进去的SystemMessage都给踢出来。避免SystemMessage在模型上下文中重复添加
+                if isinstance(self._model_context, NoSystemUnboundedChatCompletionContext):
+                    self._model_context.remove_system_messages()
+                return               
+            except asyncio.CancelledError:
+                # 重新抛出取消异常，让上层处理
+                raise
+            
+            except Exception as e:
+                # 检查是否是MCP流式调用相关的异常（通常来自anyio库）
+                exception_name = type(e).__name__
+                if exception_name in ['BrokenResourceError', 'ClosedResourceError']:
+                    # 这些异常通常表示流被中断，可能是由于ESC键中断
+                    self._console.print(f"[yellow][{self.name}] MCP stream interrupted ({exception_name}), handling gracefully...[/yellow]")
+                    # 如果是取消引起的，直接返回
+                    if cancellation_token and cancellation_token.is_cancelled():
+                        self._console.print(f"[cyan][{self.name}] Task was cancelled, stopping gracefully.[/cyan]")
+                        return
+                    # 对于流中断异常，不重试，直接返回
+                    self._console.print(f"[yellow][{self.name}] Stream interrupted, ending task execution.[/yellow]")
+                    return
+                
+                input_messages = [TextMessage(content="遇到一个错误，请确认工具调用参数格式都正确。问题如下："+str(e),source='user')]
+
+                # 如果是最后一次尝试，抛出异常
+                if attempt >= max_retries:
+                    final_error_msg = f"[{self.name}] Failed after {max_retries + 1} attempts. Final error: {type(e).__name__}: {str(e)}"
+                    raise Exception(final_error_msg) from e
+                
+                # 计算下次重试的延迟时间（指数退避）
+                current_delay = retry_delay * (2 ** attempt)
+                self._console.print(f"[{self.name}] Retrying in {current_delay} seconds...", style="red")
+                await asyncio.sleep(current_delay)
+                if cancellation_token and cancellation_token.is_cancelled():
+                    return
+
 
     async def _compress_message(self, cancellation_token: CancellationToken | None = None,):
         compress_agent = AssistantAgent(
@@ -218,6 +301,7 @@ class BaseAgent(AssistantAgent):
         )
 
         res:Response = await compress_agent.on_messages([msg], cancellation_token)
+        self._add_to_memory_queue(res.chat_message)
         summary = [res.chat_message]
         return summary
 

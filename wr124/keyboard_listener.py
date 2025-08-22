@@ -151,6 +151,8 @@ class SimpleKeyboardListener:
                         self.console.print("\n[yellow]⏸️  检测到 ESC 键，正在中断任务...[/yellow]")
                         if self._cancellation_source:
                             self._cancellation_source.cancel()
+                        # 立即开始恢复终端状态
+                        self._restore_terminal_settings(old_settings)
                         break
                         
                 except (KeyboardInterrupt, EOFError):
@@ -172,8 +174,12 @@ class SimpleKeyboardListener:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         
-        # 彻底恢复终端设置
+        # 立即强制恢复终端设置
         self._force_restore_terminal()
+        
+        # 额外等待一小段时间确保终端状态稳定
+        import time
+        time.sleep(0.1)
     
     def _force_restore_terminal(self):
         """强制恢复终端到正常状态"""
@@ -181,6 +187,8 @@ class SimpleKeyboardListener:
             # 方法1: 直接恢复到正常模式
             import subprocess
             subprocess.run(['stty', 'echo', 'icanon'], check=False, stderr=subprocess.DEVNULL)
+            # 额外确保终端完全恢复
+            subprocess.run(['stty', 'sane'], check=False, stderr=subprocess.DEVNULL)
         except:
             try:
                 # 方法2: 使用系统命令重置终端
@@ -193,6 +201,14 @@ class SimpleKeyboardListener:
                     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, attrs)
                 except:
                     pass
+        
+        # 额外步骤：发送终端重置序列
+        try:
+            # 发送ANSI重置序列
+            sys.stdout.write('\033c')  # 完全重置终端
+            sys.stdout.flush()
+        except:
+            pass
     
     def _restore_terminal_settings(self, old_settings):
         """恢复终端设置的辅助方法"""

@@ -1,0 +1,1 @@
+python script/run_agent.py -t 完成xtd项目的cpp代码编译构建 -p xtd -a wr124/agents/preset_agents/cpp_build_engineer.md
