@@ -93,6 +93,38 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  cppbuild:
+    image: cppbuild:latest
+    container_name: cppbuild
+    hostname: cppbuild
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    working_dir: /root/project
+    environment:
+      - MCP_CLIENT_DOCKER=true
+      - TZ=Asia/Shanghai
+      - CUDA_HOME=/usr/local/cuda      
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      # 挂载项目代码库
+      - /media/wnk/projects/xtd:/root/project/
+      # 挂载CUDA目录
+      - /usr/local/cuda-12.1:/usr/local/cuda
+    networks:
+      - shrimp-network      
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]                
+
 volumes:
   mongodb_data:
     driver: local

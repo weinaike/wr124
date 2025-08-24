@@ -67,20 +67,21 @@ async def main():
         
         # 注册工具
         # tools = await tool_manager.register_tools(tool_mapping)
-        tools = await tool_manager.register_tools(mcp_servers['base_tools'])
+        # tools = await tool_manager.register_tools(mcp_servers['base_tools'])
         tools = await tool_manager.register_tools(mcp_servers['task'])
+        tools = await tool_manager.register_tools(mcp_servers['docker'])
         
-        if args.debug:
-            print_tools_info(tools, debug=True)
+        print_tools_info(tools, debug=args.debug)
         
         # 创建模型客户端
-        model_client = config_manager.get_model_client("glm-4.5")
+        model_client = config_manager.get_model_client("glm-4.5-air")
         
         # 创建Team实例
         team = Team(model_client)
-        
+        # 启动搜索智能体子工具
+        await team.set_enable_search_agent_tool()
         # 第一步：注册工具到Team
-        console.print("[cyan]🔧 注册工具...[/cyan]")
+        console.print(f"[cyan]🔧 注册工具{len(tool_manager.get_all_tools())}...[/cyan]")
         team.register_tools(tool_manager.get_all_tools())
         
         # 第二步：根据参数设置主智能体

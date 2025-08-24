@@ -58,21 +58,37 @@ class ConfigManager:
                 "X-Project-ID": self.project_id,
                 "X-Session-ID": self.session_id,
             },
-            sse_read_timeout=3600,
+            sse_read_timeout=600,
+            timeout=600
         )
         
         # 基础工具服务器
         servers['base_tools'] = StreamableHttpServerParams(
             url="http://localhost:8080/mcp",
-            sse_read_timeout=3600,
+            sse_read_timeout=600,
         )
         
         # Shrimp任务管理器
         servers['shrimp'] = StdioServerParams(
             command='npx',
-            args=["-y", "mcp-shrimp-task-manager"]
+            args=["-y", "mcp-shrimp-task-manager"],
+            read_timeout_seconds=600
         )
         
+        servers['command'] = StdioServerParams(
+            command='node',
+            args=["/home/wnk/code/DesktopCommanderMCP/dist/index.js"],
+            read_timeout_seconds=600
+        )
+
+        servers['docker'] = StdioServerParams(
+            command='docker',
+            args=["exec", "-i", "cppbuild", "node", "//usr/src/app/dist/index.js"],
+            read_timeout_seconds=600
+        )
+
+
+
         return servers
     
     @property

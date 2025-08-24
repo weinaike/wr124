@@ -10,11 +10,14 @@ from autogen_core import CancellationToken
 from autogen_core.models import ChatCompletionClient, ModelInfo, ModelFamily
 from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, TextMessage
 from autogen_agentchat.base import TaskResult
+from autogen_agentchat.tools import AgentTool
+from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from rich.console import Console as RichConsole
 from pydantic import BaseModel, Field
 import yaml
 from .agent_base import BaseAgent, STOP_PROMPT
+from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 
 
 
@@ -96,7 +99,34 @@ class Team:
         self._default_agent_config = None
         self._available_tools = []  # 存储所有可用工具
         self._load_default_config()
-    
+
+    async def set_enable_search_agent_tool(self):
+        param = StdioServerParams(
+            command='npx',
+            args=["-y", "@adenot/mcp-google-search"],
+            read_timeout_seconds=30, 
+            env={
+                "GOOGLE_API_KEY": "AIzaSyBe9lSID-zHpWDu-LxAHvxFw33E7fcIo7g",
+                "GOOGLE_SEARCH_ENGINE_ID": "5413b28bf35ea4aa4",
+                # "HTTP_PROXY": "http://127.0.0.1:7890",
+                # "HTTPS_PROXY": "http://127.0.0.1:7890"
+            }
+        )
+        tools = await mcp_server_tools(param)
+        config_path = Path(__file__).parent / "preset_agents" / "search_agent.md"
+        agent_param = parse_agent_markdown(config_path)
+        agent = AssistantAgent(
+            name=agent_param.name,
+            model_client=self._model_client,
+            description=agent_param.description,
+            system_message=agent_param.prompt,
+            tools=tools,
+            max_tool_iterations=50,
+        )
+        tool = AgentTool(agent, return_value_as_last_message=True)
+        self._available_tools.append(tool)
+        return tool
+
     def _load_default_config(self) -> None:
         """加载默认的智能体配置"""
         try:
@@ -131,8 +161,8 @@ class Team:
         Args:
             tools: 工具列表
         """
-        self._available_tools = tools
-        self._console.print(f"[green]✓ 注册了 {len(tools)} 个工具[/green]")
+        self._available_tools.extend(tools)
+        self._console.print(f"[green]✓ 有效工具 {len(self._available_tools)} 个[/green]")
     
     def _filter_tools_by_names(self, tool_names: List[str]) -> List:
         """
@@ -240,6 +270,26 @@ class Team:
         agent_param = parse_agent_markdown(config_path)
         self.set_main_agent(agent_param)
         self._console.print(f"[green]✓ 从配置文件加载主智能体: {config_path}[/green]")
+
+    def register_agent_tool(self, config_path: str) -> AgentTool:
+        """
+        注册智能体工具
+
+        Args:
+            config_path: 工具配置文件路径
+
+        Returns:
+            注册的AgentTool实例
+        """
+        if not Path(config_path).exists():
+            raise FileNotFoundError(f"配置文件不存在: {config_path}")
+
+        agent_param = parse_agent_markdown(config_path)
+        agent = self._create_agent_from_param(agent_param)
+        tool = AgentTool(agent, return_value_as_last_message=True)
+        self._available_tools.append(tool)
+        return tool
+
     
     async def execute_task(
         self, 

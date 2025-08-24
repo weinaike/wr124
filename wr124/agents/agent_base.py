@@ -4,7 +4,7 @@ import traceback
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.agents import AssistantAgent
 from typing import Any, Awaitable, Callable, List, Mapping, Sequence, AsyncGenerator, Union, Optional
-from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, TextMessage,ModelClientStreamingChunkEvent, StopMessage
+from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, TextMessage,ModelClientStreamingChunkEvent, StopMessage, MemoryQueryEvent, ToolCallExecutionEvent
 from autogen_agentchat.base import ChatAgent, TaskResult, Team, TerminationCondition, Response
 from autogen_agentchat.conditions import TextMentionTermination, ExternalTermination
 from autogen_core import CancellationToken
@@ -36,11 +36,12 @@ except ImportError:
 KEYWORD = "_I_HAVE_COMPLETED_"
 
 STOP_PROMPT = f'''
-## This is very important
-When the assigned tasks are completed and there is no other work to execute, output the termination keyword.
-Our termination keyword is: `{KEYWORD}`
 
-This keyword is very important as it prevents you from continuously outputting the same content.
+# 停止条件
+**This is VERY important**
+When the assigned tasks are completed and there is no other work to execute, output the termination keyword.
+the termination keyword is: `{KEYWORD}`
+
 '''
 NOTE_PROMPT = f'''
 This is a note: It is not part of the task but can guide your work.
@@ -90,13 +91,14 @@ class BaseAgent(AssistantAgent):
             system_message=system_message,
             tools=tools,
             reflect_on_tool_use=reflect_on_tool_use,
-            memory=memory,            
+            memory=memory,   
+            max_tool_iterations=50,         
             **kwargs,
         )
         self._temrminate_word = KEYWORD
         self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
-        self._max_tokens = 100*1024   # 100K tokens
+        self._max_tokens = 40*1024   # 100K tokens
         
         # Rich console for beautiful output
         self._console = Console()
@@ -248,6 +250,8 @@ class BaseAgent(AssistantAgent):
         for attempt in range(max_retries + 1):  # 包含初始尝试，总共6次机会
             try:
                 async for message in super().on_messages_stream(input_messages, cancellation_token):
+                    if isinstance(message, MemoryQueryEvent) or isinstance(message, ToolCallExecutionEvent):
+                        continue
                     yield message
                 # 如果成功处理完所有消息，直接返回
                 # self._model_context中添加进去的SystemMessage都给踢出来。避免SystemMessage在模型上下文中重复添加
@@ -272,11 +276,13 @@ class BaseAgent(AssistantAgent):
                     self._console.print(f"[yellow][{self.name}] Stream interrupted, ending task execution.[/yellow]")
                     return
                 
-                input_messages = [TextMessage(content="遇到一个错误，请确认工具调用参数格式都正确。问题如下："+str(e),source='user')]
+                error_detail = traceback.format_exc()
+                content = f"遇到一个错误，请确认工具调用参数格式都正确。问题如下:\n{str(e)}\n{error_detail}"
+                input_messages = [TextMessage(content=content, source='user')]
 
                 # 如果是最后一次尝试，抛出异常
                 if attempt >= max_retries:
-                    final_error_msg = f"[{self.name}] Failed after {max_retries + 1} attempts. Final error: {type(e).__name__}: {str(e)}"
+                    final_error_msg = f"[{self.name}] Failed after {max_retries + 1} attempts. Final error: {type(e).__name__}: {str(e)}\n{error_detail}"
                     raise Exception(final_error_msg) from e
                 
                 # 计算下次重试的延迟时间（指数退避）
