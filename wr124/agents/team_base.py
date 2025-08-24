@@ -4,6 +4,7 @@ Team Base 模块 - 智能体管理与任务执行
 """
 from typing import AsyncGenerator, Sequence, Optional, List, Union, Dict, Any
 import asyncio
+import os
 from pathlib import Path
 
 from autogen_core import CancellationToken
@@ -106,8 +107,8 @@ class Team:
             args=["-y", "@adenot/mcp-google-search"],
             read_timeout_seconds=30, 
             env={
-                "GOOGLE_API_KEY": "AIzaSyBe9lSID-zHpWDu-LxAHvxFw33E7fcIo7g",
-                "GOOGLE_SEARCH_ENGINE_ID": "5413b28bf35ea4aa4",
+                "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY", ""),
+                "GOOGLE_SEARCH_ENGINE_ID": os.environ.get("GOOGLE_SEARCH_ENGINE_ID", ""),
                 # "HTTP_PROXY": "http://127.0.0.1:7890",
                 # "HTTPS_PROXY": "http://127.0.0.1:7890"
             }
