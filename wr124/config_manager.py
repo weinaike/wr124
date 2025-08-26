@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from autogen_ext.tools.mcp import StdioServerParams, StreamableHttpServerParams, SseServerParams
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_core.models import ModelFamily, ModelInfo
-
+from .session.session_state_manager import SessionParam
 
 class ConfigManager:
     """配置管理器"""
@@ -21,6 +21,8 @@ class ConfigManager:
         self.env_file = env_file or "./script/.env"
         self.session_id = session_id
         self._load_environment()
+        os.environ["SHRIMP_PROJECT_ID"] = self.project_id  # 设置环境变量以供其他模块使用
+        os.environ["SHRIMP_SESSION_ID"] = self.session_id or ""
         
     def _get_default_project_id(self) -> str:
         """获取默认项目ID（使用当前目录名）"""
@@ -83,13 +85,21 @@ class ConfigManager:
 
         servers['docker'] = StdioServerParams(
             command='docker',
-            args=["exec", "-i", "cppbuild", "node", "//usr/src/app/dist/index.js"],
+            args=["exec", "-i", "cppbuild", "node", "/usr/src/app/dist/index.js"],
             read_timeout_seconds=600
         )
 
-
-
         return servers
+    
+    def get_api_server(self):
+        server = SessionParam(
+            project_id=self.project_id,
+            session_id=self.session_id,
+            api_url="http://localhost:4445/api",
+            timeout=30
+        )
+        return server
+
     
     @property
     def auth_token(self) -> str:

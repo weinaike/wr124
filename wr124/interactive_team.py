@@ -128,6 +128,7 @@ class InteractiveTeam:
                 # 为新任务创建新的取消令牌并更新交互处理器
                 if current_cancellation_token:
                     current_cancellation_token = CancellationToken()
+                    await self.setup_keyboard_listener(current_cancellation_token)
                     self.interaction_handler.update_cancellation_token(current_cancellation_token)
                 continue
             else:

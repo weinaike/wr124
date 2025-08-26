@@ -2,7 +2,7 @@
 Team Base 模块 - 智能体管理与任务执行
 负责Agent的创建、工具管理、任务执行流程管理
 """
-from typing import AsyncGenerator, Sequence, Optional, List, Union, Dict, Any
+from typing import AsyncGenerator, Mapping, Sequence, Optional, List, Union, Dict, Any, Tuple
 import asyncio
 import os
 from pathlib import Path
@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 import yaml
 from .agent_base import BaseAgent, STOP_PROMPT
 from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
+from ..session import SessionStateManager, SessionStateStatus
 
 
 
@@ -93,13 +94,34 @@ class Team:
     团队管理器 - 负责智能体管理、工具管理与任务执行
     """
     
-    def __init__(self, model_client: ChatCompletionClient):
+    def __init__(self, model_client: ChatCompletionClient):        
         self._model_client = model_client
         self._main_agent: Optional[BaseAgent] = None
         self._console = RichConsole()
         self._default_agent_config = None
         self._available_tools = []  # 存储所有可用工具
+        self._session_state_manager = None
         self._load_default_config()
+        self._resume = False
+
+    def set_resume(self, resume: bool) -> None:
+        """
+        设置是否从上次中断的地方恢复
+
+        Args:
+            resume: 是否恢复
+        """
+        self._resume = resume
+
+    def register_state_manager(self, manager: SessionStateManager) -> None:
+        """
+        注册状态管理器到智能体
+
+        Args:
+            manager: 要注册的状态管理器
+        """
+        self._session_state_manager = manager
+        self._console.print(f"[green]✓ 启动会话管理: {manager.session_id}[/green]")
 
     async def set_enable_search_agent_tool(self):
         param = StdioServerParams(
@@ -122,7 +144,7 @@ class Team:
             description=agent_param.description,
             system_message=agent_param.prompt,
             tools=tools,
-            max_tool_iterations=50,
+            max_tool_iterations=20,
         )
         tool = AgentTool(agent, return_value_as_last_message=True)
         self._available_tools.append(tool)
@@ -234,6 +256,8 @@ class Team:
             description=agent_param.description,
             system_message=system_prompt,
             tools=tools,
+            reflect_on_tool_use=False,
+            max_tool_iterations=20
         )
         
         # 设置颜色属性
@@ -308,7 +332,10 @@ class Team:
         """
         if not self._main_agent:
             raise RuntimeError("Agent not initialized. Call set_main_agent() first.")
-                
+        if self._resume and self._session_state_manager:
+            ret, state = await self._session_state_manager.restore_agent_session_state(self._main_agent.name)
+            if ret == SessionStateStatus.SUCCESS:
+                await self._main_agent.load_state(state)  
         try:
             async for msg in self._main_agent.run_stream(
                 task=task,
@@ -332,6 +359,16 @@ class Team:
                 self._console.print(f"[red]⚠️  任务执行时发生异常: {e}[/red]")
             yield TextMessage(content=f"任务执行异常: {str(e)}", source="system")
             return
+        finally:
+            component = self._main_agent.dump_component()
+            state = await self._main_agent.save_state()
+            if self._session_state_manager:
+                await self._session_state_manager.upload_session_state(
+                        agent_name=self._main_agent.name,
+                        agent=component,
+                        state=state,
+                        task=task,
+                    )
     
     def create_exit_task_result(self, reason: str) -> TaskResult:
         """创建退出时的 TaskResult"""

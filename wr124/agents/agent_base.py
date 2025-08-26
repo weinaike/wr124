@@ -4,7 +4,18 @@ import traceback
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.agents import AssistantAgent
 from typing import Any, Awaitable, Callable, List, Mapping, Sequence, AsyncGenerator, Union, Optional
-from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, TextMessage,ModelClientStreamingChunkEvent, StopMessage, MemoryQueryEvent, ToolCallExecutionEvent
+from autogen_agentchat.messages import (
+    BaseChatMessage, 
+    BaseAgentEvent, 
+    TextMessage,
+    ModelClientStreamingChunkEvent, 
+    StopMessage, 
+    MemoryQueryEvent, 
+    ToolCallExecutionEvent, 
+    ToolCallSummaryMessage
+)
+
+
 from autogen_agentchat.base import ChatAgent, TaskResult, Team, TerminationCondition, Response
 from autogen_agentchat.conditions import TextMentionTermination, ExternalTermination
 from autogen_core import CancellationToken
@@ -49,7 +60,7 @@ This is a note: It is not part of the task but can guide your work.
 2. When you are unsure about the next step, you can use `todo_read` or `list_tasks` to understand the task progress.
 3. After completing a task or to-do, remember to update the task status.
 4. Once all tasks are completed, enter the termination keyword. Note: Only output it when all tasks are finished; otherwise, continue executing tasks.
-To reiterate, this message is just a note. When you have a clear task to execute, you should choose to ignore it.
+5. if you encounter any issues or blockers, using the `search_agent` tool to look up internet resources can be a very effective way to address them.
 '''
 
 class NoSystemUnboundedChatCompletionContext(UnboundedChatCompletionContext):
@@ -70,6 +81,7 @@ class BaseAgent(AssistantAgent):
         reflect_on_tool_use: bool | None = None,
         memory: Sequence[Memory] | None = None,
         enable_memory_recording: bool = False,
+        max_tool_iterations=1,
         **kwargs,
     ) -> None:
        
@@ -92,13 +104,13 @@ class BaseAgent(AssistantAgent):
             tools=tools,
             reflect_on_tool_use=reflect_on_tool_use,
             memory=memory,   
-            max_tool_iterations=50,         
+            max_tool_iterations=max_tool_iterations,         
             **kwargs,
         )
         self._temrminate_word = KEYWORD
         self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
-        self._max_tokens = 40*1024   # 100K tokens
+        self._max_tokens = 40000   # token
         
         # Rich console for beautiful output
         self._console = Console()
@@ -187,7 +199,7 @@ class BaseAgent(AssistantAgent):
                                 self._add_to_memory_queue(msg)
                         else:
                             raise ValueError(f"Invalid message type in sequence: {type(msg)}")
-                        
+                input_messages_bak = input_messages.copy()
                 models_usage = RequestUsage(0,0)
                 stop_reason: StopMessage | None = None
                 completed = False
@@ -204,7 +216,8 @@ class BaseAgent(AssistantAgent):
                             output_messages.append(message.chat_message)
                             # 发送到记忆队列
                             self._add_to_memory_queue(message.chat_message)
-
+                            if isinstance(message.chat_message, ToolCallSummaryMessage):
+                                input_messages = [TextMessage(content="先总结以上工具调用结果，形成阶段性分析结论. 再描述后续须执行的动作以指导推进任务目标完成", source='user')]
                             # 统计token使用情况
                             if message.chat_message.models_usage:
                                 models_usage = message.chat_message.models_usage
@@ -225,17 +238,19 @@ class BaseAgent(AssistantAgent):
                             # 发送到记忆队列
                             self._add_to_memory_queue(message)
 
-                    input_messages = []
+                    
 
                     # 如果output_messages 计算token数量超过最大限制，则需要进行摘要，并将摘要作为新的输入
                     if models_usage.prompt_tokens > self._max_tokens:
-                        input_messages = await self._compress_message(cancellation_token)
+                        input_messages = input_messages_bak +  await self._compress_message(cancellation_token)
+                        models_usage = RequestUsage(0,0)
+                        await self._model_context.clear() # 清空模型上下文，以便进行新的输入
+
                     
 
                 yield TaskResult(messages=output_messages, stop_reason=stop_reason)
             
             finally:
-                # 清理记忆任务
                 await self._cleanup_memory_task()
 
     async def on_messages_stream(self, input_messages: list[BaseChatMessage], cancellation_token: CancellationToken | None = None
@@ -247,22 +262,28 @@ class BaseAgent(AssistantAgent):
         max_retries = 3
         retry_delay = 1  # 初始延迟2秒
         
-        for attempt in range(max_retries + 1):  # 包含初始尝试，总共6次机会
+        attempt = 0
+        while(attempt <= max_retries):       
             try:
                 async for message in super().on_messages_stream(input_messages, cancellation_token):
-                    if isinstance(message, MemoryQueryEvent) or isinstance(message, ToolCallExecutionEvent):
+                    if isinstance(message, MemoryQueryEvent) :
+                        continue
+                    if isinstance(message, ToolCallExecutionEvent):
+                        attempt = 0
                         continue
                     yield message
                 # 如果成功处理完所有消息，直接返回
                 # self._model_context中添加进去的SystemMessage都给踢出来。避免SystemMessage在模型上下文中重复添加
                 if isinstance(self._model_context, NoSystemUnboundedChatCompletionContext):
                     self._model_context.remove_system_messages()
+                    
                 return               
             except asyncio.CancelledError:
-                # 重新抛出取消异常，让上层处理
+                # 重新抛出取消异常，让上层处理               
                 raise
             
             except Exception as e:
+                attempt += 1
                 # 检查是否是MCP流式调用相关的异常（通常来自anyio库）
                 exception_name = type(e).__name__
                 if exception_name in ['BrokenResourceError', 'ClosedResourceError']:
@@ -283,6 +304,8 @@ class BaseAgent(AssistantAgent):
                 # 如果是最后一次尝试，抛出异常
                 if attempt >= max_retries:
                     final_error_msg = f"[{self.name}] Failed after {max_retries + 1} attempts. Final error: {type(e).__name__}: {str(e)}\n{error_detail}"
+                    await self._compress_message()
+                    # 重新抛出取消异常，让上层处理
                     raise Exception(final_error_msg) from e
                 
                 # 计算下次重试的延迟时间（指数退避）
@@ -294,21 +317,38 @@ class BaseAgent(AssistantAgent):
 
 
     async def _compress_message(self, cancellation_token: CancellationToken | None = None,):
+        if cancellation_token is None:
+            cancellation_token = CancellationToken()
+
+        tool_name = 'add_memory'
+        filtered_tools = []
+        
+        for tool in self._tools:
+            # 检查工具名称匹配
+            if (hasattr(tool, 'name') and tool.name == tool_name) or \
+                (hasattr(tool, '__name__') and tool.__name__ == tool_name) or \
+                (hasattr(tool, 'schema') and tool.schema.get('name') == tool_name):
+                filtered_tools.append(tool)
+                break
+
         compress_agent = AssistantAgent(
             name=f'{self.name}_compressor',
             model_client=self._model_client,
             description="A compressor agent for tasks.",
             system_message=SUMMARY_HISTORY_SYSTEM_TEMPLATE,
             model_context=self._model_context,
+            tools=filtered_tools,
+            max_tool_iterations=5
         )
         msg = TextMessage(
-            content="The conversation history has exceeded the token limit. Please summarize the conversation.",
+            content="Please summarize the conversation following system prompt. first call `add_memory` to upload summary to database. add then output the summary to user",
             source="user",
         )
 
         res:Response = await compress_agent.on_messages([msg], cancellation_token)
         self._add_to_memory_queue(res.chat_message)
         summary = [res.chat_message]
+        
         return summary
 
     def _add_to_memory_queue(self, message: BaseChatMessage | BaseAgentEvent) -> None:
@@ -347,7 +387,6 @@ class BaseAgent(AssistantAgent):
                 await self._memory_task
             except asyncio.CancelledError:
                 pass
-
 
 if __name__ == "__main__":
     from autogen_ext.models.openai import OpenAIChatCompletionClient

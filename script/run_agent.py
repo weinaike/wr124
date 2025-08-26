@@ -12,6 +12,8 @@ import uuid
 from rich.console import Console as RichConsole
 from autogen_core import CancellationToken
 
+
+
 # 添加项目根目录到Python路径
 current_dir = os.getcwd()
 sys.path.insert(0, str(current_dir))
@@ -25,7 +27,7 @@ from wr124.util import print_tools_info
 from wr124.terminal_manager import TerminalManager  # 导入终端管理器
 from autogen_agentchat.ui import Console
 from wr124.filesystem import tool_mapping
-
+from wr124.session.session_state_manager import SessionStateManager, SessionParam
 
 async def main():
     """主函数 - 重构版本，支持AgentParam配置"""
@@ -33,6 +35,7 @@ async def main():
     terminal_manager = TerminalManager.get_instance()
     
     session_id = str(uuid.uuid4())
+    session_id = "7fd0cab3-507c-499b-ba1c-aeb970a62626"
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="运行Agent，执行指定任务。")
     parser.add_argument("-t", "--task", type=str, help="要执行的任务（如未提供，将启用交互模式）")
@@ -41,6 +44,7 @@ async def main():
     parser.add_argument("-i", "--interactive", action="store_true", help="在任务完成后启用交互式用户输入")
     parser.add_argument("-d", "--debug", action="store_true", help="启用调试模式")
     parser.add_argument("-a", "--agent", type=str, help="Agent配置文件路径（支持markdown格式）")
+    parser.add_argument("-r", "--resume", action="store_true", help="是否从上次中断的地方恢复")
     args = parser.parse_args()
     
     console = RichConsole()
@@ -74,17 +78,25 @@ async def main():
         print_tools_info(tools, debug=args.debug)
         
         # 创建模型客户端
-        model_client = config_manager.get_model_client("glm-4.5-air")
+        model_client = config_manager.get_model_client("glm-4.5")
         
         # 创建Team实例
         team = Team(model_client)
-        # 启动搜索智能体子工具
+        
+        # 启动搜索智能体工具
         await team.set_enable_search_agent_tool()
+
+
         # 第一步：注册工具到Team
         console.print(f"[cyan]🔧 注册工具{len(tool_manager.get_all_tools())}...[/cyan]")
         team.register_tools(tool_manager.get_all_tools())
-        
-        # 第二步：根据参数设置主智能体
+
+        # 第二步： 注册会话状态管理器
+        parm = config_manager.get_api_server()
+        manager = SessionStateManager(parm)
+        team.register_state_manager(manager)
+
+        # 第三步：根据参数设置主智能体
         if args.agent:
             # 使用外部配置文件
             agent_config_path = Path(args.agent)
@@ -99,6 +111,10 @@ async def main():
             console.print("[cyan]📋 使用默认Agent配置（general_assistant.md）[/cyan]")
             team.set_main_agent()  # 使用默认配置
         
+        # 第四步：
+        if args.resume:
+            team.set_resume(True)
+
         # 如果需要交互模式，创建InteractiveTeam
         if not args.interactive or args.task is None:
             console.print("[yellow]📱 启用交互模式[/yellow]")
