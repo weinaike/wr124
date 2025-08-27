@@ -347,7 +347,6 @@ class Team:
             # 任务被取消，生成取消消息
             self._console.print("[yellow]⏸️  任务已被中断[/yellow]")
             yield TextMessage(content="任务执行被用户中断", source="system")
-            return
         except Exception as e:
             # 处理其他可能的异常
             # 检查是否是重试失败后的包装异常
@@ -358,7 +357,6 @@ class Team:
             else:
                 self._console.print(f"[red]⚠️  任务执行时发生异常: {e}[/red]")
             yield TextMessage(content=f"任务执行异常: {str(e)}", source="system")
-            return
         finally:
             component = self._main_agent.dump_component()
             state = await self._main_agent.save_state()

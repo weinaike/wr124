@@ -359,107 +359,29 @@ class SessionStateManager:
         Returns:
             Tuple[状态码, 文档ID或错误信息]
         """
-        # 尝试使用 aiohttp（推荐）
-        try:           
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Project-ID": self.project_id
-                }
-                
-                async with session.post(
-                    f"{self.api_url}/{self.project_id}/json-documents",
-                    json=document_data,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=self.timeout)
-                ) as response:
-                    if response.status in [200, 201]:
-                        result = await response.json()
-                        document_id = result.get('id', 'unknown')
-                        self.console.print(f"[green]✓ 会话状态已上传: {document_id}[/green]")
-                        return SessionStateStatus.SUCCESS, document_id
-                    else:
-                        error_text = await response.text()
-                        self.console.print(f"[yellow]⚠️  状态上传失败 (HTTP {response.status}): {error_text}[/yellow]")
-                        return SessionStateStatus.FAILED, error_text
-                        
-        except ImportError:
-            # 回退到 httpx
-            try:
-                import httpx
-                
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Project-ID": self.project_id
-                }
-                
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.post(
-                        f"{self.api_url}/{self.project_id}/json-documents",
-                        json=document_data,
-                        headers=headers
-                    )
-                    
-                    if response.status_code in [200, 201]:
-                        result = response.json()
-                        document_id = result.get('id', 'unknown')
-                        self.console.print(f"[green]✓ 会话状态已上传: {document_id}[/green]")
-                        return SessionStateStatus.SUCCESS, document_id
-                    else:
-                        self.console.print(f"[yellow]⚠️  状态上传失败 (HTTP {response.status_code}): {response.text}[/yellow]")
-                        return SessionStateStatus.FAILED, response.text
-                        
-            except ImportError:
-                # 最后回退到同步方式
-                return await self._upload_document_sync(document_data)
-    
-    async def _upload_document_sync(self, document_data: dict) -> Tuple[SessionStateStatus, Optional[str]]:
-        """
-        使用同步HTTP请求上传文档数据
-        """
-        def sync_upload():
-            try:
-                import urllib.request
-                import urllib.error
-                
-                url = f"{self.api_url}/{self.project_id}/json-documents"
-                data = json.dumps(document_data).encode('utf-8')
-                
-                req = urllib.request.Request(
-                    url,
-                    data=data,
-                    headers={
-                        'Content-Type': 'application/json',
-                        'X-Project-ID': self.project_id
-                    }
-                )
-                
-                with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                    if response.status in [200, 201]:
-                        result = json.loads(response.read().decode('utf-8'))
-                        return True, result.get('id', 'unknown'), None
-                    else:
-                        return False, None, f"HTTP {response.status}"
-                        
-            except urllib.error.URLError as e:
-                return False, None, str(e)
-            except Exception as e:
-                return False, None, str(e)
-        
-        try:
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                success, document_id, error = await loop.run_in_executor(executor, sync_upload)
-                
-                if success:
-                    self.console.print(f"[green]✓ 会话状态已上传: {document_id}[/green]")
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Project-ID": self.project_id
+            }
+            
+            async with session.post(
+                f"{self.api_url}/{self.project_id}/json-documents",
+                json=document_data,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as response:
+                if response.status in [200, 201]:
+                    result = await response.json()
+                    document_id = result.get('_id', 'unknown')  
+                    document_type = result.get('document_type', '')                  
+                    self.console.print(f"[green]✓ {document_type}已上传: {document_id}[/green]")
                     return SessionStateStatus.SUCCESS, document_id
                 else:
-                    self.console.print(f"[yellow]⚠️  状态上传失败: {error}[/yellow]")
-                    return SessionStateStatus.FAILED, error
-                    
-        except Exception as e:
-            return SessionStateStatus.FAILED, str(e)
+                    error_text = await response.text()
+                    self.console.print(f"[yellow]⚠️  状态上传失败 (HTTP {response.status}): {error_text}[/yellow]")
+                    return SessionStateStatus.FAILED, error_text                  
+
     
     async def _download_documents(self, params: dict) -> Tuple[SessionStateStatus, List[Dict[str, Any]]]:
         """

@@ -4,15 +4,17 @@
 """
 import traceback
 import sys
-from typing import Dict, Any, Union, Callable
+from typing import Dict, Any, List, Union, Callable
 from autogen_ext.tools.mcp import (
     StdioServerParams, 
     StreamableHttpServerParams, 
     SseServerParams, 
-    mcp_server_tools
+    mcp_server_tools,
+    SseMcpToolAdapter,
+    StdioMcpToolAdapter,
+    StreamableHttpMcpToolAdapter
 )
 from rich.console import Console as RichConsole
-
 
 class ToolManager:
     """工具管理器"""
@@ -21,6 +23,18 @@ class ToolManager:
         self._tools: Dict[str, Any] = {}
         self._console = RichConsole()
     
+    def add_context_tool(self, tools: List[StdioMcpToolAdapter]):
+        """
+        添加上下文工具（该工具要求 ClientSession 在生命周期内容不变）
+        """
+        for tool in tools:
+            tool_name = tool.name
+            if not self._validate_tool_name(tool_name):
+                continue
+            self._tools[tool_name] = tool
+        return self._tools
+        
+
     async def register_tools(
         self, 
         param: Union[StdioServerParams, StreamableHttpServerParams, SseServerParams, Dict[str, Callable]]

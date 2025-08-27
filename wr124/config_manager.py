@@ -95,7 +95,7 @@ class ConfigManager:
         server = SessionParam(
             project_id=self.project_id,
             session_id=self.session_id,
-            api_url="http://localhost:4445/api",
+            api_url="http://localhost/api",
             timeout=30
         )
         return server
