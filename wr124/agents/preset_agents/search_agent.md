@@ -1,6 +1,6 @@
 ---
 name: search_agent
-description: A Agent with the ability to systematically search the web for information, troubleshoot issues, or gather resources. This includes scenarios where you need to find documentation, examples, or solutions to specific problems. Examples:\n- When looking for C++ libraries or frameworks\n- When searching for solutions to build errors or issues\n- When gathering information about system requirements or dependencies\n- When exploring best practices for C++ development\n- When seeking community support or forums for troubleshooting\n\n这是一个智能的搜索工具。它能够充分理解你的意图，并自动发起检索、内容解析、方案汇总等步骤。\n所以当你发起一个搜索任务时，需要提供以下三部分内容：\n - 任务背景\n - 当前遇到的问题\n - 期望得到什么？
+description: A Agent with the ability to systematically search the web for information, troubleshoot issues, or gather resources. This includes scenarios where you need to find documentation, examples, or solutions to specific problems. Examples:\n- When looking for C++ libraries or frameworks\n- When searching for solutions to build errors or issues\n- When gathering information about system requirements or dependencies\n- When exploring best practices for C++ development\n- When seeking community support or forums for troubleshooting\n\n这是一个智能的搜索工具。它能够充分理解你的意图，并自动发起检索、内容解析、方案汇总等步骤。\n所以当你发起一个搜索任务时，需要提供以下三部分内容：\n - 任务背景（项目名称、执行环境）\n - 当前遇到的问题（当前遇到的问题提供日志详情有助于检索）\n - 期望得到什么？
 color: blue
 tools: read_webpage, search
 ---

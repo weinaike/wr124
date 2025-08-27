@@ -3,20 +3,15 @@
 负责会话状态的上传、下载、存储和恢复
 """
 
-import os
-import json
-import asyncio
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from datetime import datetime
 from enum import Enum
-import concurrent.futures
 
 from autogen_core import ComponentModel
 from pydantic import BaseModel
 from rich.console import Console as RichConsole
 import aiohttp
 import urllib.request
-import urllib.error
 
 class SessionStateStatus(str, Enum):
     """会话状态状态枚举"""
@@ -226,7 +221,6 @@ class SessionStateManager:
             params = {
                 "session_id": self.session_id,
                 "document_type": "session_state",
-                "tags": ["session_state"],  # API 期望的是数组格式
                 "limit": 1,  # 只获取最新的一条
                 "sort_by": "created_at",  # API 使用 sort_by 而不是 sort
                 "sort_order": -1  # API 使用 sort_order，-1 表示降序
@@ -393,109 +387,29 @@ class SessionStateManager:
         Returns:
             Tuple[状态码, 文档列表]
         """
-        try:
-            # 尝试使用 aiohttp（推荐）
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Project-ID": self.project_id
-                }
-                
-                async with session.get(
-                    f"{self.api_url}/{self.project_id}/json-documents",
-                    params=params,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=self.timeout)
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        documents = result.get('data', []) if isinstance(result, dict) else result
-                        return SessionStateStatus.SUCCESS, documents
-                    else:
-                        error_text = await response.text()
-                        self.console.print(f"[yellow]⚠️  文档下载失败 (HTTP {response.status}): {error_text}[/yellow]")
-                        return SessionStateStatus.FAILED, []
-                        
-        except ImportError:
-            # 回退到 httpx
-            try:
-                import httpx
-                
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Project-ID": self.project_id
-                }
-                
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.get(
-                        f"{self.api_url}/{self.project_id}/json-documents",
-                        params=params,
-                        headers=headers
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        documents = result.get('data', []) if isinstance(result, dict) else result
-                        return SessionStateStatus.SUCCESS, documents
-                    else:
-                        self.console.print(f"[yellow]⚠️  文档下载失败 (HTTP {response.status_code}): {response.text}[/yellow]")
-                        return SessionStateStatus.FAILED, []
-                        
-            except ImportError:
-                # 最后回退到同步方式
-                return await self._download_documents_sync(params)
-        except Exception as e:
-            self.console.print(f"[yellow]⚠️  文档下载异常: {str(e)}[/yellow]")
-            return SessionStateStatus.FAILED, []
-    
-    async def _download_documents_sync(self, params: dict) -> Tuple[SessionStateStatus, List[Dict[str, Any]]]:
-        """
-        使用同步HTTP请求下载文档列表
-        """
-        def sync_download():
-            try:
-                import urllib.request
-                import urllib.error
-                import urllib.parse
-                
-                # 构建查询字符串
-                query_string = urllib.parse.urlencode(params)
-                url = f"{self.api_url}/{self.project_id}/json-documents?{query_string}"
-                
-                req = urllib.request.Request(
-                    url,
-                    headers={
-                        'Content-Type': 'application/json',
-                        'X-Project-ID': self.project_id
-                    }
-                )
-                
-                with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                    if response.status == 200:
-                        result = json.loads(response.read().decode('utf-8'))
-                        documents = result.get('data', []) if isinstance(result, dict) else result
-                        return True, documents, None
-                    else:
-                        return False, [], f"HTTP {response.status}"
-                        
-            except urllib.error.URLError as e:
-                return False, [], str(e)
-            except Exception as e:
-                return False, [], str(e)
-        
-        try:
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                success, documents, error = await loop.run_in_executor(executor, sync_download)
-                
-                if success:
+
+        # 尝试使用 aiohttp（推荐）
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Project-ID": self.project_id
+            }
+            
+            async with session.get(
+                f"{self.api_url}/{self.project_id}/json-documents",
+                params=params,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    documents = result.get('data', []) if isinstance(result, dict) else result
                     return SessionStateStatus.SUCCESS, documents
                 else:
-                    self.console.print(f"[yellow]⚠️  文档下载失败: {error}[/yellow]")
+                    error_text = await response.text()
+                    self.console.print(f"[yellow]⚠️  文档下载失败 (HTTP {response.status}): {error_text}[/yellow]")
                     return SessionStateStatus.FAILED, []
-                    
-        except Exception as e:
-            return SessionStateStatus.FAILED, []
+
     
     async def _download_document(self, document_id: str) -> Tuple[SessionStateStatus, Optional[Dict[str, Any]]]:
         """
@@ -507,99 +421,25 @@ class SessionStateManager:
         Returns:
             Tuple[状态码, 文档数据]
         """
-        try:
-            # 尝试使用 aiohttp（推荐）
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Project-ID": self.project_id
-                }
-                
-                async with session.get(
-                    f"{self.api_url}/{self.project_id}/json-documents/{document_id}",
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=self.timeout)
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        return SessionStateStatus.SUCCESS, result
-                    else:
-                        error_text = await response.text()
-                        self.console.print(f"[yellow]⚠️  文档下载失败 (HTTP {response.status}): {error_text}[/yellow]")
-                        return SessionStateStatus.FAILED, None
-                        
-        except ImportError:
-            # 回退到 httpx
-            try:
-                import httpx
-                
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-Project-ID": self.project_id
-                }
-                
-                async with httpx.AsyncClient(timeout=self.timeout) as client:
-                    response = await client.get(
-                        f"{self.api_url}/{self.project_id}/json-documents/{document_id}",
-                        headers=headers
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        return SessionStateStatus.SUCCESS, result
-                    else:
-                        self.console.print(f"[yellow]⚠️  文档下载失败 (HTTP {response.status_code}): {response.text}[/yellow]")
-                        return SessionStateStatus.FAILED, None
-                        
-            except ImportError:
-                # 最后回退到同步方式
-                return await self._download_document_sync(document_id)
-        except Exception as e:
-            self.console.print(f"[yellow]⚠️  文档下载异常: {str(e)}[/yellow]")
-            return SessionStateStatus.FAILED, None
-    
-    async def _download_document_sync(self, document_id: str) -> Tuple[SessionStateStatus, Optional[Dict[str, Any]]]:
-        """
-        使用同步HTTP请求下载单个文档
-        """
-        def sync_download():
-            try:
-                import urllib.request
-                import urllib.error
-                
-                url = f"{self.api_url}/{self.project_id}/json-documents/{document_id}"
-                
-                req = urllib.request.Request(
-                    url,
-                    headers={
-                        'Content-Type': 'application/json',
-                        'X-Project-ID': self.project_id
-                    }
-                )
-                
-                with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                    if response.status == 200:
-                        result = json.loads(response.read().decode('utf-8'))
-                        return True, result, None
-                    else:
-                        return False, None, f"HTTP {response.status}"
-                        
-            except urllib.error.URLError as e:
-                return False, None, str(e)
-            except Exception as e:
-                return False, None, str(e)
-        
-        try:
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                success, document, error = await loop.run_in_executor(executor, sync_download)
-                
-                if success:
-                    return SessionStateStatus.SUCCESS, document
+        # 尝试使用 aiohttp（推荐）
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Content-Type": "application/json",
+                "X-Project-ID": self.project_id
+            }
+            
+            async with session.get(
+                f"{self.api_url}/{self.project_id}/json-documents/{document_id}",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    return SessionStateStatus.SUCCESS, result
                 else:
-                    self.console.print(f"[yellow]⚠️  文档下载失败: {error}[/yellow]")
+                    error_text = await response.text()
+                    self.console.print(f"[yellow]⚠️  文档下载失败 (HTTP {response.status}): {error_text}[/yellow]")
                     return SessionStateStatus.FAILED, None
-                    
-        except Exception as e:
-            return SessionStateStatus.FAILED, None
+                        
+        
     

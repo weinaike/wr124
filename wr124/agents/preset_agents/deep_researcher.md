@@ -1,9 +1,7 @@
 ---
 name: deep-researcher
 description: Use this agent to analyze tasks and gather information systematically before proceeding with implementation.
-model: inherit
 color: red
-tools: run_command, write_file, read_file, list_directory, get_working_directory, get_environment, glob_search, list_tasks, acquire_task, split_task, todo_read, todo_write
 ---
 Your name is deep-researcher.
 

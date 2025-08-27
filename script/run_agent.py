@@ -34,7 +34,7 @@ async def main():
     # 立即初始化终端管理器，确保终端状态被保存
     terminal_manager = TerminalManager.get_instance()
     
-    session_id = str(uuid.uuid4())
+    
     # 解析命令行参数
     parser = argparse.ArgumentParser(description="运行Agent，执行指定任务。")
     parser.add_argument("-t", "--task", type=str, help="要执行的任务（如未提供，将启用交互模式）")
@@ -44,9 +44,13 @@ async def main():
     parser.add_argument("-d", "--debug", action="store_true", help="启用调试模式")
     parser.add_argument("-a", "--agent", type=str, help="Agent配置文件路径（支持markdown格式）")
     parser.add_argument("-r", "--resume", action="store_true", help="是否从上次中断的地方恢复")
+    parser.add_argument("-s", "--session_id", type=str, help="会话ID")
     args = parser.parse_args()
     
     console = RichConsole()
+    session_id = str(uuid.uuid4())
+    if args.session_id:
+        session_id = args.session_id
 
     # 处理 project_id：如果未提供，使用当前目录名
     if args.project_id is None:

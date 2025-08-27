@@ -135,18 +135,17 @@ class BaseAgent(AssistantAgent):
         cancellation_token: CancellationToken | None = None,
         output_task_messages: bool = True,
     ) -> TaskResult:
-        with trace_invoke_agent_span(agent_name=self.name, agent_description=self.description):
-            result: TaskResult | None = None
-            async for message in self.run_stream(
-                task=task,
-                cancellation_token=cancellation_token,
-                output_task_messages=output_task_messages,
-            ):
-                if isinstance(message, TaskResult):
-                    result = message
-            if result is not None:
-                return result
-            raise AssertionError("The stream should have returned the final result.")
+        result: TaskResult | None = None
+        async for message in self.run_stream(
+            task=task,
+            cancellation_token=cancellation_token,
+            output_task_messages=output_task_messages,
+        ):
+            if isinstance(message, TaskResult):
+                result = message
+        if result is not None:
+            return result
+        raise AssertionError("The stream should have returned the final result.")
 
     async def run_stream(
         self,
@@ -217,7 +216,10 @@ class BaseAgent(AssistantAgent):
                             # 发送到记忆队列
                             self._add_to_memory_queue(message.chat_message)
                             if isinstance(message.chat_message, ToolCallSummaryMessage):
+                                # 当max_tool_iterations设置>1 时，多次的工具调用后，做依次总结是有必要的。
                                 input_messages = [TextMessage(content="先总结以上工具调用结果，形成阶段性分析结论. 再描述后续须执行的动作以指导推进任务目标完成", source='user')]
+                            else:
+                                input_messages = []
                             # 统计token使用情况
                             if message.chat_message.models_usage:
                                 models_usage = message.chat_message.models_usage
@@ -256,8 +258,9 @@ class BaseAgent(AssistantAgent):
     async def on_messages_stream(self, input_messages: list[BaseChatMessage], cancellation_token: CancellationToken | None = None
                                  )-> AsyncGenerator[Union[BaseAgentEvent, BaseChatMessage, Response], None]:
         """
-        处理消息流，添加异常处理和重试机制
-        最多重试5次，每次间隔递增的等待时间
+        重载底层AssitantAgent的on_messages_stream方法, 主要添加工具调用失败后重试功能
+        1. 处理消息流，添加异常处理和重试机制
+        2. 最多重试5次，每次间隔递增的等待时间
         """
         max_retries = 3
         retry_delay = 1  # 初始延迟2秒
