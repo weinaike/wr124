@@ -100,7 +100,7 @@ class Team:
         self._console = RichConsole()
         self._default_agent_config = None
         self._available_tools = []  # 存储所有可用工具
-        self._session_state_manager = None
+        self._session_state_manager:Optional[SessionStateManager] = None
         self._load_default_config()
         self._resume = False
 
@@ -121,6 +121,8 @@ class Team:
             manager: 要注册的状态管理器
         """
         self._session_state_manager = manager
+        if self._main_agent:
+            self._main_agent.register_session_manager(manager)
         self._console.print(f"[green]✓ 启动会话管理: {manager.session_id}[/green]")
 
     async def set_enable_search_agent_tool(self):
@@ -144,7 +146,7 @@ class Team:
             description=agent_param.description,
             system_message=agent_param.prompt,
             tools=tools,
-            max_tool_iterations=20,
+            max_tool_iterations=40,
         )
         tool = AgentTool(agent, return_value_as_last_message=True)
         self._available_tools.append(tool)
@@ -278,6 +280,8 @@ class Team:
         
         # 创建智能体，工具会在_create_agent_from_param中自动筛选
         self._main_agent = self._create_agent_from_param(agent_param)
+        if self._session_state_manager:
+            self._main_agent.register_session_manager(self._session_state_manager)
         
         tools_count = len(self._main_agent.tools) if self._main_agent.tools else 0
         self._console.print(f"[green]✓ 主智能体已设置: {agent_param.name}，配置了 {tools_count} 个工具[/green]")
@@ -311,6 +315,8 @@ class Team:
 
         agent_param = parse_agent_markdown(config_path)
         agent = self._create_agent_from_param(agent_param)
+        if self._session_state_manager:
+            agent.register_session_manager(self._session_state_manager)
         tool = AgentTool(agent, return_value_as_last_message=True)
         self._available_tools.append(tool)
         return tool
@@ -333,9 +339,8 @@ class Team:
         if not self._main_agent:
             raise RuntimeError("Agent not initialized. Call set_main_agent() first.")
         if self._resume and self._session_state_manager:
-            ret, state = await self._session_state_manager.restore_agent_session_state(self._main_agent.name)
-            if ret == SessionStateStatus.SUCCESS:
-                await self._main_agent.load_state(state)  
+            await self._main_agent.download_state()
+
         try:
             async for msg in self._main_agent.run_stream(
                 task=task,
@@ -358,15 +363,12 @@ class Team:
                 self._console.print(f"[red]⚠️  任务执行时发生异常: {e}[/red]")
             yield TextMessage(content=f"任务执行异常: {str(e)}", source="system")
         finally:
-            component = self._main_agent.dump_component()
-            state = await self._main_agent.save_state()
-            if self._session_state_manager:
-                await self._session_state_manager.upload_session_state(
-                        agent_name=self._main_agent.name,
-                        agent=component,
-                        state=state,
-                        task=task,
-                    )
+            await self._main_agent.upload_state(task)
+            for tool in self._main_agent.tools or []:
+                if isinstance(tool, AgentTool) :
+                    if isinstance(tool._agent, BaseAgent):
+                        await tool._agent.upload_state('agent_tool')
+
     
     def create_exit_task_result(self, reason: str) -> TaskResult:
         """创建退出时的 TaskResult"""

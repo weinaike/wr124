@@ -35,6 +35,8 @@ from autogen_core.models import (
 )
 from rich.console import Console
 
+from wr124.session.session_state_manager import SessionStateManager, SessionStateStatus
+
 # 处理相对导入问题 - 支持直接运行和作为模块导入
 try:
     from .prompt_compress import SUMMARY_HISTORY_SYSTEM_TEMPLATE
@@ -110,7 +112,7 @@ class BaseAgent(AssistantAgent):
         self._temrminate_word = KEYWORD
         self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
-        self._max_tokens = 40000   # token
+        self._max_tokens = 100000   # token
         
         # Rich console for beautiful output
         self._console = Console()
@@ -124,7 +126,11 @@ class BaseAgent(AssistantAgent):
         if self._enable_memory_recording:
             self._memory_recorder = MemoryRecorder(model_client, name)
             self._memory_queue = asyncio.Queue(maxsize=100)  # 限制队列大小
-    
+        self._session_manager: Optional[SessionStateManager] = None
+
+    def register_session_manager(self, session_manager: SessionStateManager):
+        self._session_manager = session_manager
+
     @property
     def tools(self):
         return self._tools
@@ -240,13 +246,13 @@ class BaseAgent(AssistantAgent):
                             # 发送到记忆队列
                             self._add_to_memory_queue(message)
 
-                    
-
                     # 如果output_messages 计算token数量超过最大限制，则需要进行摘要，并将摘要作为新的输入
                     if models_usage.prompt_tokens > self._max_tokens:
                         input_messages = input_messages_bak +  await self._compress_message(cancellation_token)
-                        models_usage = RequestUsage(0,0)
+                        models_usage = RequestUsage(0,0)        
+                        await self.upload_state("compress history")
                         await self._model_context.clear() # 清空模型上下文，以便进行新的输入
+                        break
 
                     
 
@@ -254,6 +260,8 @@ class BaseAgent(AssistantAgent):
             
             finally:
                 await self._cleanup_memory_task()
+                # 更新文档， 暂时不生效， 写入那些内容，写到哪里，以及何时取用需要预先设定。
+                # await self._update_document()
 
     async def on_messages_stream(self, input_messages: list[BaseChatMessage], cancellation_token: CancellationToken | None = None
                                  )-> AsyncGenerator[Union[BaseAgentEvent, BaseChatMessage, Response], None]:
@@ -307,7 +315,6 @@ class BaseAgent(AssistantAgent):
                 # 如果是最后一次尝试，抛出异常
                 if attempt >= max_retries:
                     final_error_msg = f"[{self.name}] Failed after {max_retries + 1} attempts. Final error: {type(e).__name__}: {str(e)}\n{error_detail}"
-                    await self._compress_message()
                     # 重新抛出取消异常，让上层处理
                     raise Exception(final_error_msg) from e
                 
@@ -351,7 +358,6 @@ class BaseAgent(AssistantAgent):
         res:Response = await compress_agent.on_messages([msg], cancellation_token)
         self._add_to_memory_queue(res.chat_message)
         summary = [res.chat_message]
-        
         return summary
 
     def _add_to_memory_queue(self, message: BaseChatMessage | BaseAgentEvent) -> None:
@@ -390,6 +396,27 @@ class BaseAgent(AssistantAgent):
                 await self._memory_task
             except asyncio.CancelledError:
                 pass
+
+    async def upload_state(self, note: str):
+        if self._session_manager:
+            msgs = await self._model_context.get_messages()
+            if len(msgs) < 5:
+                return
+            state = await self.save_state()
+            await self._session_manager.upload_session_state(self.name, None, state, note)
+
+    async def download_state(self):
+        if self._session_manager:
+            ret, state = await self._session_manager.restore_agent_session_state(self.name)
+            if ret == SessionStateStatus.SUCCESS:
+                await self.load_state(state)
+
+    async def _update_document(self):
+        # 什么时候要更新文档：
+        # 1. 新增新特性， 2. 有获取新知识， 3. 上下文压缩时，历史消除， 这个时候更新历史文档（压缩时已经调用add_memory上传）
+        cancellation_token = CancellationToken()
+        msg = TextMessage(content="Please update your knowledge document in Agent.md if you have new information or features to add. If no updates are needed, respond with 'No updates needed'.", source="user")
+        await self.on_messages([msg], cancellation_token=cancellation_token)
 
 if __name__ == "__main__":
     from autogen_ext.models.openai import OpenAIChatCompletionClient

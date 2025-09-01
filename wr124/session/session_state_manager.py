@@ -65,7 +65,7 @@ class SessionStateManager:
     async def upload_session_state(
         self, 
         agent_name: str,
-        agent: ComponentModel,
+        agent: Optional[ComponentModel],
         state: Mapping[str, Any],
         task: str, 
     ) -> Tuple[SessionStateStatus, Optional[str]]:
@@ -85,7 +85,20 @@ class SessionStateManager:
             return SessionStateStatus.DISABLED, "会话状态上传已禁用"
         
         try:
-            
+            if agent:
+                agent_document_data = {
+                    "name": agent_name,
+                    "description": f"{agent_name}_{self.session_id}",
+                    "document_type": "agent_component_model",
+                    "content": agent.model_dump(),
+                    "session_id": self.session_id,
+                    "tags": ["agent", "component_model"],
+                    "is_public": False
+                }
+                status , txt = await self._upload_document(agent_document_data)
+                if status != SessionStateStatus.SUCCESS:
+                    self.console.print(f"[yellow]⚠️  会话状态上传失败: {txt}[/yellow]")
+                
             # 创建JSON文档请求数据
             session_document_data = {
                 "name": agent_name,
@@ -96,23 +109,8 @@ class SessionStateManager:
                 "tags": ["session_state", "agent_state"],
                 "is_public": False
             }
-            status , txt = await self._upload_document(session_document_data)
-            if status != SessionStateStatus.SUCCESS:
-                self.console.print(f"[yellow]⚠️  会话状态上传失败: {txt}[/yellow]")
-                return status, txt
-
-            agent_document_data = {
-                "name": agent_name,
-                "description": f"{agent_name}_{self.session_id}",
-                "document_type": "agent_component_model",
-                "content": agent.model_dump(),
-                "session_id": self.session_id,
-                "tags": ["agent", "component_model"],
-                "is_public": False
-            }
-
             # 尝试上传
-            return await self._upload_document(agent_document_data)
+            return await self._upload_document(session_document_data)
             
         except Exception as e:
             self.console.print(f"[yellow]⚠️  会话状态上传异常: {str(e)}[/yellow]")

@@ -90,6 +90,8 @@ if build system is existing in the codebase, run the build command.
 - For Bazel: `bazel build //path/to:target`
 
 Parallelize the build process based on available CPU cores. `-j$(nproc)` is a good default for most systems, especially for timeout issues.
+一个调试小技巧：
+如果`make -j$(nproc)`出错，日志内容会非常长，不容易定位问题。 这个时候选择串行编译`make -j1`能够准确定位错误位置。
 
 ### 3.2 Troubleshooting Build Failures
 Common issues and solutions:
