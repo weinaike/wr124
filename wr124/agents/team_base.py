@@ -259,7 +259,7 @@ class Team:
             system_message=system_prompt,
             tools=tools,
             reflect_on_tool_use=False,
-            max_tool_iterations=20
+            max_tool_iterations=40
         )
         
         # 设置颜色属性

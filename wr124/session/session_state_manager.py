@@ -232,17 +232,17 @@ class SessionStateManager:
             status, documents = await self._download_documents(params)
             if status == SessionStateStatus.SUCCESS and documents:
                 latest_document = documents[0]
-                self.console.print(f"[green]✓ 恢复智能体 '{agent_name}' 的会话状态: {latest_document.get('_id', 'unknown')}[/green]")
+                self.console.print(f"[green]✓ 恢复{self.session_id}的智能体 '{agent_name}' 的会话状态: {latest_document.get('_id', 'unknown')}[/green]")
                 return SessionStateStatus.SUCCESS, latest_document.get('content', {})
             else:
-                self.console.print(f"[yellow]⚠️  未找到智能体 '{agent_name}' 的会话状态记录[/yellow]")
+                self.console.print(f"[yellow]⚠️  未找到智能体 '{agent_name}' 的会话状态记录({self.session_id})[/yellow]")
                 return SessionStateStatus.FAILED, None
             
         except Exception as e:
             self.console.print(f"[yellow]⚠️  智能体会话状态恢复异常: {str(e)}[/yellow]")
             return SessionStateStatus.FAILED, None
 
-    async def restore_latest_session_state(self) -> Tuple[SessionStateStatus, Optional[Dict[str, Any]]]:
+    async def restore_latest_session_state(self, agent_name: str) -> Tuple[SessionStateStatus, Optional[Dict[str, Any]]]:
         """
         恢复当前会话的最新会话状态
         
@@ -255,14 +255,14 @@ class SessionStateManager:
         try:
             # 构建查询参数，获取当前会话的最新session_state数据
             params = {
-                "session_id": self.session_id,
                 "document_type": "session_state",
                 "tags": ["session_state"],
                 "limit": 1,  # 只获取最新的一条
                 "sort_by": "created_at",  # 按创建时间排序
                 "sort_order": -1  # 降序，获取最新的
             }
-            
+            if agent_name:
+                params["name_pattern"] = agent_name  # API 使用 name_pattern 而不是 name
             # 获取最新的会话状态数据
             status, documents = await self._download_documents(params)
             if status == SessionStateStatus.SUCCESS and documents:

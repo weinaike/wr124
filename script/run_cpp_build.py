@@ -68,6 +68,14 @@ async def main():
         telemetry = TelemetrySetup(config_manager.project_id)
         tracer = telemetry.initialize()
         
+
+        # 创建模型客户端
+        model_client = config_manager.get_model_client("glm-4.5")        
+        # 创建Team实例
+        team = Team(model_client)        
+        # 启动搜索智能体工具,这个内置工具需要先加载
+        await team.set_enable_search_agent_tool()
+
         # 初始化工具管理器并注册工具
         tool_manager = ToolManager()
         mcp_servers = config_manager.get_mcp_servers()
@@ -76,7 +84,8 @@ async def main():
         # tools = await tool_manager.register_tools(tool_mapping)
         # tools = await tool_manager.register_tools(mcp_servers['base_tools'])
         tools = await tool_manager.register_tools(mcp_servers['task'])
-        # tools = await tool_manager.register_tools(mcp_servers['docker'])
+        if args.agent == "wr124/agents/preset_agents/deep_researcher.md":
+            tools = await tool_manager.register_tools(mcp_servers['search'])
         command_mcp = StdioServerParams(
             command='docker',
             args=["exec", "-i", args.project_id, "node", "/usr/src/app/dist/index.js"],
@@ -85,17 +94,7 @@ async def main():
         async with create_mcp_server_session(command_mcp) as session:
             tools = await mcp_server_tools(command_mcp, session=session)
             tools = tool_manager.add_context_tool(tools)
-            print_tools_info(tools, debug=args.debug)
-            
-            # 创建模型客户端
-            model_client = config_manager.get_model_client("glm-4.5")
-            
-            # 创建Team实例
-            team = Team(model_client)
-            
-            # 启动搜索智能体工具
-            await team.set_enable_search_agent_tool()
-
+            print_tools_info(tools, debug=args.debug)          
 
             # 第一步：注册工具到Team
             console.print(f"[cyan]🔧 注册工具{len(tool_manager.get_all_tools())}...[/cyan]")
@@ -126,7 +125,7 @@ async def main():
                 team.set_resume(True)
 
             # 如果需要交互模式，创建InteractiveTeam
-            if not args.interactive or args.task is None:
+            if args.interactive or args.task is None:
                 console.print("[yellow]📱 启用交互模式[/yellow]")
                 interactive_team = InteractiveTeam(team)
                 interactive_team.enable_interactive_mode(use_default_callback=True)

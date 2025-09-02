@@ -12,7 +12,8 @@ from autogen_agentchat.messages import (
     StopMessage, 
     MemoryQueryEvent, 
     ToolCallExecutionEvent, 
-    ToolCallSummaryMessage
+    ToolCallSummaryMessage,
+    ToolCallRequestEvent
 )
 
 
@@ -31,7 +32,7 @@ from autogen_core.models import (
     RequestUsage,
     UserMessage,
     SystemMessage,
-    AssistantMessage
+    AssistantMessage    
 )
 from rich.console import Console
 
@@ -113,6 +114,8 @@ class BaseAgent(AssistantAgent):
         self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
         self._max_tokens = 100000   # token
+        self._max_compress_count = 3
+        self._min_tool_count_to_summary = 20
         
         # Rich console for beautiful output
         self._console = Console()
@@ -208,6 +211,10 @@ class BaseAgent(AssistantAgent):
                 models_usage = RequestUsage(0,0)
                 stop_reason: StopMessage | None = None
                 completed = False
+                trigger_summary = False
+                skip_stop = False  # 结束关键词跳过
+                compress_count = 0  # 压缩上下文次数，压缩上下文可以减少token使用，相当于重启任务（仅保留少数总结信息）。超过固定次数，任务还未完成，则退出。需要人工介入解决复杂难题
+                tool_count = 0  # 统计一次性调用工具次数，工具调用次数大于 self._min_tool_count_to_summary，进行一次总结，规划下一步动作，不足时不做处理
                 while True:
                     if cancellation_token.is_cancelled():
                         stop_reason = "Cancelled by user"
@@ -217,31 +224,46 @@ class BaseAgent(AssistantAgent):
                     async for message in self.on_messages_stream(input_messages, cancellation_token):
                     
                         if isinstance(message, Response):
-                            yield message.chat_message
+                            if trigger_summary:
+                                trigger_summary = False
+                                skip_stop = True # 如果上次是summary提示，则跳过终止条件检查（因为总结过程中可能输出 _I_HAVE_COMPLETED_ 字样），这个不是期望的， 其他时候都保持False
+                            yield message.chat_message                            
                             output_messages.append(message.chat_message)
                             # 发送到记忆队列
                             self._add_to_memory_queue(message.chat_message)
                             if isinstance(message.chat_message, ToolCallSummaryMessage):
                                 # 当max_tool_iterations设置>1 时，多次的工具调用后，做依次总结是有必要的。
-                                input_messages = [TextMessage(content="先总结以上工具调用结果，形成阶段性分析结论. 再描述后续须执行的动作以指导推进任务目标完成", source='user')]
+                                if tool_count >= self._min_tool_count_to_summary:
+                                    input_messages = [TextMessage(content="先总结以上工具调用结果，形成阶段性分析结论. 再描述后续须执行的动作以指导推进任务目标完成", source='user')]
+                                    trigger_summary = True
+                                else:
+                                    input_messages = []
                             else:
                                 input_messages = []
+                            tool_count = 0
                             # 统计token使用情况
                             if message.chat_message.models_usage:
                                 models_usage = message.chat_message.models_usage
                             
-                            # 检查是否满足终止条件
-                            stop_message = await self._termination_condition([message.chat_message])
-                            if stop_message is not None:
-                                # Reset the termination conditions and turn count.
-                                await self._termination_condition.reset()
-                                completed = True
-                                break
+                            # 是否要跳过一次判断
+                            if skip_stop:
+                                skip_stop = False
+                            else:
+                                # 检查是否满足终止条件
+                                stop_message = await self._termination_condition([message.chat_message])                            
+                                if stop_message is not None:
+                                    # Reset the termination conditions and turn count.
+                                    await self._termination_condition.reset()
+                                    completed = True
+                                    break                            
+                                
                         else:
                             yield message
                             if isinstance(message, ModelClientStreamingChunkEvent):
                                 # Skip the model client streaming chunk events.
                                 continue
+                            if isinstance(message,ToolCallRequestEvent):
+                                tool_count += 1
                             output_messages.append(message)
                             # 发送到记忆队列
                             self._add_to_memory_queue(message)
@@ -252,9 +274,10 @@ class BaseAgent(AssistantAgent):
                         models_usage = RequestUsage(0,0)        
                         await self.upload_state("compress history")
                         await self._model_context.clear() # 清空模型上下文，以便进行新的输入
-                        break
-
-                    
+                        compress_count += 1
+                        if compress_count > self._max_compress_count:
+                            self._console.print(f"[yellow]⚠️  压缩历史记录达到最大限制，停止[/yellow]")
+                            break                    
 
                 yield TaskResult(messages=output_messages, stop_reason=stop_reason)
             
@@ -410,7 +433,15 @@ class BaseAgent(AssistantAgent):
             ret, state = await self._session_manager.restore_agent_session_state(self.name)
             if ret == SessionStateStatus.SUCCESS:
                 await self.load_state(state)
-
+                return
+            else:
+                ret, state = await self._session_manager.restore_latest_session_state(self.name)
+                if ret == SessionStateStatus.SUCCESS:
+                    await self.load_state(state)
+                    return
+                else:
+                    return
+            
     async def _update_document(self):
         # 什么时候要更新文档：
         # 1. 新增新特性， 2. 有获取新知识， 3. 上下文压缩时，历史消除， 这个时候更新历史文档（压缩时已经调用add_memory上传）

@@ -70,12 +70,24 @@ class ConfigManager:
             sse_read_timeout=600,
         )
         
-        # Shrimp任务管理器
-        servers['shrimp'] = StdioServerParams(
+        servers['search'] = StdioServerParams(
             command='npx',
-            args=["-y", "mcp-shrimp-task-manager"],
-            read_timeout_seconds=600
+            args=["-y", "@adenot/mcp-google-search"],
+            read_timeout_seconds=30, 
+            env={
+                "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY", ""),
+                "GOOGLE_SEARCH_ENGINE_ID": os.environ.get("GOOGLE_SEARCH_ENGINE_ID", ""),
+                # "HTTP_PROXY": "http://127.0.0.1:7890",
+                # "HTTPS_PROXY": "http://127.0.0.1:7890"
+            }
         )
+
+        # # Shrimp任务管理器
+        # servers['shrimp'] = StdioServerParams(
+        #     command='npx',
+        #     args=["-y", "mcp-shrimp-task-manager"],
+        #     read_timeout_seconds=600
+        # )
         
         servers['command'] = StdioServerParams(
             command='node',

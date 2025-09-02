@@ -68,6 +68,13 @@ async def main():
         telemetry = TelemetrySetup(config_manager.project_id)
         tracer = telemetry.initialize()
         
+        # 创建模型客户端
+        model_client = config_manager.get_model_client("glm-4.5")        
+        # 创建Team实例
+        team = Team(model_client)        
+        # 启动搜索智能体工具
+        await team.set_enable_search_agent_tool()
+
         # 初始化工具管理器并注册工具
         tool_manager = ToolManager()
         mcp_servers = config_manager.get_mcp_servers()
@@ -83,14 +90,7 @@ async def main():
             tools = tool_manager.add_context_tool(tools)
             print_tools_info(tools, debug=args.debug)
             
-            # 创建模型客户端
-            model_client = config_manager.get_model_client("glm-4.5")
-            
-            # 创建Team实例
-            team = Team(model_client)
-            
-            # 启动搜索智能体工具
-            await team.set_enable_search_agent_tool()
+
 
 
             # 第一步：注册工具到Team
@@ -122,7 +122,7 @@ async def main():
                 team.set_resume(True)
 
             # 如果需要交互模式，创建InteractiveTeam
-            if not args.interactive or args.task is None:
+            if args.interactive or args.task is None:
                 console.print("[yellow]📱 启用交互模式[/yellow]")
                 interactive_team = InteractiveTeam(team)
                 interactive_team.enable_interactive_mode(use_default_callback=True)
