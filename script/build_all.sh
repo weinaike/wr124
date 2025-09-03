@@ -1,13 +1,37 @@
 #!/bin/bash
 
+# 批量构建脚本
+# 用法: 
+#   ./build_all.sh                    - 使用默认的 projects.txt
+#   ./build_all.sh projects_file.txt  - 使用指定的项目文件
+#   ./build_all.sh /path/to/file.txt  - 使用绝对路径的项目文件
+
 # 脚本目录
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECTS_FILE="$SCRIPT_DIR/projects.txt"
+
+# 获取项目文件路径 - 支持命令行参数
+if [ $# -eq 1 ]; then
+    # 如果提供了参数，使用参数作为项目文件路径
+    if [[ "$1" == /* ]]; then
+        # 绝对路径
+        PROJECTS_FILE="$1"
+    else
+        # 相对路径，相对于脚本目录
+        PROJECTS_FILE="$SCRIPT_DIR/$1"
+    fi
+else
+    # 默认使用脚本目录下的 projects.txt
+    PROJECTS_FILE="$SCRIPT_DIR/projects.txt"
+fi
+
 BUILD_SCRIPT="$SCRIPT_DIR/build_one.sh"
 
 # 检查必要文件是否存在
 if [ ! -f "$PROJECTS_FILE" ]; then
     echo "错误: 项目列表文件不存在: $PROJECTS_FILE"
+    echo "用法: $0 [项目文件路径]"
+    echo "示例: $0 projects.txt"
+    echo "示例: $0 /path/to/custom_projects.txt"
     exit 1
 fi
 
