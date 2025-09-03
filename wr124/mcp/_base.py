@@ -112,9 +112,9 @@ class McpToolAdapter(BaseTool[BaseModel, Any], ABC, Generic[TServerParams]):
 
             normalized_content_list = self._normalize_payload_to_content_list(result.content)
 
-            if result.isError:
-                serialized_error_message = self.return_value_as_string(normalized_content_list)
-                raise Exception(serialized_error_message)
+            # if result.isError:
+            #     serialized_error_message = self.return_value_as_string(normalized_content_list)
+            #     raise Exception(serialized_error_message)
             return normalized_content_list
 
         except exceptions_to_catch:
