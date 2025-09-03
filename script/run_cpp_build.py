@@ -28,7 +28,7 @@ from wr124.terminal_manager import TerminalManager  # 导入终端管理器
 from autogen_agentchat.ui import Console
 from wr124.filesystem import tool_mapping
 from wr124.session.session_state_manager import SessionStateManager, SessionParam
-from autogen_ext.tools.mcp import create_mcp_server_session, mcp_server_tools, StdioServerParams
+from wr124.mcp import create_mcp_server_session, mcp_server_tools, StdioServerParams
 async def main():
     """主函数 - 重构版本，支持AgentParam配置"""
     # 立即初始化终端管理器，确保终端状态被保存

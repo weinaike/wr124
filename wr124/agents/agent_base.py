@@ -36,7 +36,7 @@ from autogen_core.models import (
 )
 from rich.console import Console
 
-from wr124.session.session_state_manager import SessionStateManager, SessionStateStatus
+from ..session.session_state_manager import SessionStateManager, SessionStateStatus
 
 # 处理相对导入问题 - 支持直接运行和作为模块导入
 try:

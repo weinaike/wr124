@@ -18,7 +18,7 @@ from rich.console import Console as RichConsole
 from pydantic import BaseModel, Field
 import yaml
 from .agent_base import BaseAgent, STOP_PROMPT
-from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
+from ..mcp import StdioServerParams, mcp_server_tools
 from ..session import SessionStateManager, SessionStateStatus
 
 

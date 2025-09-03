@@ -1,5 +1,5 @@
 
-from autogen_ext.tools.mcp import StdioMcpToolAdapter
+from .mcp import StdioMcpToolAdapter
 from typing import List, Optional, Union, Callable, get_type_hints
 from rich.console import Console as RichConsole
 from pydantic import BaseModel, Field
@@ -8,6 +8,7 @@ import inspect
 import sys
 import os
 import subprocess
+import signal
 
 # 延迟导入终端管理器，避免循环导入
 def _get_terminal_manager():
@@ -75,7 +76,13 @@ async def default_user_input_callback() -> tuple[str, str | None]:
     Returns tuple (action, task) where:
     - action: 'continue' to continue with new task, 'exit' to exit
     - task: new task string if action is 'continue', None if action is 'exit'
+    
+    Automatically exits if no input is received within 30 seconds.
     """
+    def timeout_handler(signum, frame):
+        """处理超时信号"""
+        raise TimeoutError("用户输入超时")
+    
     try:
         # 确保终端状态正确
         ensure_terminal_ready_for_input()
@@ -87,26 +94,64 @@ async def default_user_input_callback() -> tuple[str, str | None]:
             print("2. 退出程序")
             print("="*50)
             
-            user_input = safe_input("请选择 (1/2) 或直接输入任务: ")
+            try:
+                # 设置30秒超时
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(30)
+                
+                user_input = safe_input("请选择 (1/2) 或直接输入任务 (30秒内无输入将自动退出): ")
+                
+                # 取消超时设置
+                signal.alarm(0)
+                
+            except TimeoutError:
+                print("\n\n⏰ 30秒内未收到输入，自动退出程序。")
+                return ('exit', None)
             
             if user_input in ['1']:
-                new_task = safe_input("请输入任务: ")
-                if new_task:
-                    return ('continue', new_task)
-                else:
-                    print("任务不能为空，请重新输入。")
-                    continue
+                try:
+                    # 为任务输入也设置超时
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(30)
+                    
+                    new_task = safe_input("请输入任务 (30秒内无输入将自动退出): ")
+                    
+                    # 取消超时设置
+                    signal.alarm(0)
+                    
+                    if new_task:
+                        return ('continue', new_task)
+                    else:
+                        print("任务不能为空，请重新输入。")
+                        continue
+                except TimeoutError:
+                    print("\n\n⏰ 30秒内未收到输入，自动退出程序。")
+                    return ('exit', None)
+                    
             elif user_input in ['2', 'exit', 'quit', '退出']:
                 return ('exit', None)
             elif user_input.lower() in ['n', 'no', '否']:
                 return ('exit', None)
             elif user_input.lower() in ['y', 'yes', '是']:
-                new_task = safe_input("请输入任务: ")
-                if new_task:
-                    return ('continue', new_task)
-                else:
-                    print("任务不能为空，请重新输入。")
-                    continue
+                try:
+                    # 为任务输入也设置超时
+                    signal.signal(signal.SIGALRM, timeout_handler)
+                    signal.alarm(30)
+                    
+                    new_task = safe_input("请输入任务 (30秒内无输入将自动退出): ")
+                    
+                    # 取消超时设置
+                    signal.alarm(0)
+                    
+                    if new_task:
+                        return ('continue', new_task)
+                    else:
+                        print("任务不能为空，请重新输入。")
+                        continue
+                except TimeoutError:
+                    print("\n\n⏰ 30秒内未收到输入，自动退出程序。")
+                    return ('exit', None)
+                    
             elif len(user_input) > 2:  # 假设直接输入的是新任务
                 return ('continue', user_input)
             else:
@@ -115,6 +160,9 @@ async def default_user_input_callback() -> tuple[str, str | None]:
     except (KeyboardInterrupt, EOFError):
         print("\n\n用户中断，退出程序。")
         return ('exit', None)
+    finally:
+        # 确保清除任何剩余的alarm设置
+        signal.alarm(0)
 
 def print_tools(tools: List[StdioMcpToolAdapter|Callable]) -> None:
     """

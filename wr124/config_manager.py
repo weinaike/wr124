@@ -6,7 +6,7 @@ import os
 from typing import Optional, Dict, Any
 from pathlib import Path
 from dotenv import load_dotenv
-from autogen_ext.tools.mcp import StdioServerParams, StreamableHttpServerParams, SseServerParams
+from .mcp import StdioServerParams, StreamableHttpServerParams, SseServerParams
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from autogen_core.models import ModelFamily, ModelInfo
 from .session.session_state_manager import SessionParam

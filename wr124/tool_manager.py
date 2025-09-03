@@ -5,7 +5,7 @@
 import traceback
 import sys
 from typing import Dict, Any, List, Union, Callable
-from autogen_ext.tools.mcp import (
+from .mcp import (
     StdioServerParams, 
     StreamableHttpServerParams, 
     SseServerParams, 
