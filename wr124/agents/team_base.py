@@ -125,18 +125,19 @@ class Team:
             self._main_agent.register_session_manager(manager)
         self._console.print(f"[green]✓ 启动会话管理: {manager.session_id}[/green]")
 
-    async def set_enable_search_agent_tool(self):
-        param = StdioServerParams(
-            command='npx',
-            args=["-y", "@adenot/mcp-google-search"],
-            read_timeout_seconds=30, 
-            env={
-                "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY", ""),
-                "GOOGLE_SEARCH_ENGINE_ID": os.environ.get("GOOGLE_SEARCH_ENGINE_ID", ""),
-                # "HTTP_PROXY": "http://127.0.0.1:7890",
-                # "HTTPS_PROXY": "http://127.0.0.1:7890"
-            }
-        )
+    async def set_enable_search_agent_tool(self, param: Optional[StdioServerParams] = None) -> AgentTool:
+        if param is None:
+            param = StdioServerParams(
+                command='npx',
+                args=["-y", "@adenot/mcp-google-search"],
+                read_timeout_seconds=30, 
+                env={
+                    "GOOGLE_API_KEY": os.environ.get("GOOGLE_API_KEY", ""),
+                    "GOOGLE_SEARCH_ENGINE_ID": os.environ.get("GOOGLE_SEARCH_ENGINE_ID", ""),
+                    # "HTTP_PROXY": "http://127.0.0.1:7890",
+                    # "HTTPS_PROXY": "http://127.0.0.1:7890"
+                }
+            )
         tools = await mcp_server_tools(param)
         config_path = Path(__file__).parent / "preset_agents" / "search_agent.md"
         agent_param = parse_agent_markdown(config_path)
@@ -339,6 +340,7 @@ class Team:
         if not self._main_agent:
             raise RuntimeError("Agent not initialized. Call set_main_agent() first.")
         if self._resume and self._session_state_manager:
+            self._resume = False
             await self._main_agent.download_state()
 
         try:
