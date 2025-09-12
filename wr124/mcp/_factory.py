@@ -194,13 +194,31 @@ async def mcp_server_tools(
 
     For more examples and detailed usage, see the samples directory in the package repository.
     """
-    if session is None:
-        async with create_mcp_server_session(server_params) as temp_session:
-            await temp_session.initialize()
-
-            tools = await temp_session.list_tools()
-    else:
-        tools = await session.list_tools()
+    tools = None
+    
+    try:
+        if session is None:
+            async with create_mcp_server_session(server_params) as temp_session:
+                await temp_session.initialize()
+                tools = await temp_session.list_tools()
+        else:
+            # Session from McpSessionManager is already initialized
+            tools = await session.list_tools()
+            
+    except Exception as e:
+        # Handle specific MCP errors
+        error_msg = str(e)
+        if "400 Bad Request" in error_msg:
+            raise ConnectionError(f"MCP server returned bad request (400). Check server configuration and parameters: {error_msg}")
+        elif "CancelledError" in error_msg or "cancel scope" in error_msg.lower():
+            raise ConnectionError(f"MCP connection was cancelled. This might be due to server timeout or network issues: {error_msg}")
+        elif "WouldBlock" in error_msg:
+            raise ConnectionError(f"MCP connection blocked. Server might be unresponsive: {error_msg}")
+        else:
+            raise ConnectionError(f"Failed to connect to MCP server: {error_msg}")
+    
+    if tools is None:
+        raise RuntimeError("Failed to retrieve tools from MCP server")
 
     if isinstance(server_params, StdioServerParams):
         return [StdioMcpToolAdapter(server_params=server_params, tool=tool, session=session) for tool in tools.tools]

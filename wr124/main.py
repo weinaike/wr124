@@ -11,6 +11,7 @@ from pathlib import Path
 import uuid
 from rich.console import Console as RichConsole
 from autogen_core import CancellationToken
+from datetime import datetime
 
 
 from .config_manager import ConfigManager
@@ -24,68 +25,6 @@ from autogen_agentchat.ui import Console
 from .filesystem import tool_mapping
 from .session.session_state_manager import SessionStateManager, SessionParam
 from .mcp import create_mcp_server_session, mcp_server_tools
-
-
-async def run_team(config_manager: ConfigManager, 
-                   terminal_manager: TerminalManager, 
-                   team: Team,
-                   console: RichConsole,
-                   tracer: trace.Tracer, 
-                   args: argparse.Namespace):
-
-    # 第二步： 注册会话状态管理器
-    parm = config_manager.get_session_server()
-    if parm is not None:
-        manager = SessionStateManager(parm)
-        team.register_state_manager(manager)
-
-    # 第三步：根据参数设置主智能体
-    if args.agent:
-        # 使用外部配置文件
-        agent_config_path = Path(args.agent)
-        if not agent_config_path.exists():
-            console.print(f"[red]错误: Agent配置文件不存在: {args.agent}[/red]")
-            return
-        
-        console.print(f"[cyan]📋 使用外部Agent配置文件: {args.agent}[/cyan]")
-        team.set_main_agent_from_config(str(agent_config_path))            
-    else:
-        # 使用默认配置（general_assistant.md）
-        console.print("[cyan]📋 使用默认Agent配置（general_assistant.md）[/cyan]")
-        team.set_main_agent()  # 使用默认配置
-    
-    # 第四步：
-    if args.resume:
-        team.set_resume(True)
-
-    # 如果需要交互模式，创建InteractiveTeam
-    if args.interactive or args.task is None:
-        console.print("[yellow]📱 启用交互模式[/yellow]")
-        interactive_team = InteractiveTeam(team)
-        interactive_team.enable_interactive_mode(use_default_callback=True)
-        execution_team = interactive_team
-    else:
-        execution_team = team
-    
-    # 创建取消令牌
-    cancellation_token = CancellationToken()
-    
-    try:
-        # 执行任务
-
-        with tracer.start_as_current_span(name=config_manager.session_id):
-            await Console(execution_team.run_stream(
-                task=args.task,
-                cancellation_token=cancellation_token
-            ))
-    finally:
-        # 清理键盘监听器并恢复终端状态（仅对InteractiveTeam）
-        if hasattr(execution_team, 'stop_keyboard_listener'):
-            execution_team.stop_keyboard_listener()
-        # 使用终端管理器恢复终端状态
-        terminal_manager.restore_terminal()
-            
-
 
 
 async def main():
@@ -138,29 +77,71 @@ async def main():
         mcp_servers = config_manager.get_mcp_servers()
 
         # 启动搜索智能体工具
-        if 'search' in mcp_servers:
-            await team.set_enable_search_agent_tool(mcp_servers['search'])
-        
+
+        await team.set_enable_search_agent_tool()
         # 注册工具
-        if 'task' in mcp_servers:
-            tools = await tool_manager.register_tools(mcp_servers['task'])
-        # tools = await tool_manager.register_tools(mcp_servers['docker'])
-        if 'command' in mcp_servers:
-            async with create_mcp_server_session(mcp_servers['command']) as session:
-                tools = await mcp_server_tools(mcp_servers['command'], session=session)
-                tools = tool_manager.add_context_tool(tools)
-                print_tools_info(tools, debug=args.debug)
-                # 第一步：注册工具到Team
-                console.print(f"[cyan]🔧 注册工具{len(tool_manager.get_all_tools())}...[/cyan]")
-                team.register_tools(tool_manager.get_all_tools())
-                await run_team(config_manager, terminal_manager, team, console, tracer, args)
+        for name, parm in mcp_servers.items():
+            tools = await tool_manager.register_tools(name, parm)
+        print_tools_info(tools, debug=args.debug)
+        console.print(f"[cyan]🔧 注册工具{len(tool_manager.get_all_tools())}...[/cyan]")
+        team.register_tools(tool_manager.get_all_tools())
+        
+        # 第二步： 注册会话状态管理器
+        parm = config_manager.get_session_server()
+        if parm is not None:
+            manager = SessionStateManager(parm)
+            team.register_state_manager(manager)
+
+        # 第三步：根据参数设置主智能体
+        if args.agent:
+            # 使用外部配置文件
+            agent_config_path = Path(args.agent)
+            if not agent_config_path.exists():
+                console.print(f"[red]错误: Agent配置文件不存在: {args.agent}[/red]")
+                return
+            
+            console.print(f"[cyan]📋 使用外部Agent配置文件: {args.agent}[/cyan]")
+            team.set_main_agent_from_config(str(agent_config_path))            
         else:
-            tools = await tool_manager.register_tools(tool_mapping)
-            print_tools_info(tools, debug=args.debug)
-            console.print(f"[cyan]🔧 注册工具{len(tool_manager.get_all_tools())}...[/cyan]")
-            team.register_tools(tool_manager.get_all_tools())
-            await run_team(config_manager, terminal_manager, team, console, tracer, args)
+            # 使用默认配置（general_assistant.md）
+            console.print("[cyan]📋 使用默认Agent配置（general_assistant.md）[/cyan]")
+            team.set_main_agent()  # 使用默认配置
+        
+        # 第四步：
+        if args.resume:
+            team.set_resume(True)
+
+        # 如果需要交互模式，创建InteractiveTeam
+        if args.interactive or args.task is None:
+            console.print("[yellow]📱 启用交互模式[/yellow]")
+            interactive_team = InteractiveTeam(team)
+            interactive_team.enable_interactive_mode(use_default_callback=True)
+            execution_team = interactive_team
+        else:
+            execution_team = team
+        
+        # 创建取消令牌
+        cancellation_token = CancellationToken()
+        
+        try:
+            # 执行任务
+
+            with tracer.start_as_current_span(name=config_manager.session_id):
+                await Console(execution_team.run_stream(
+                    task=args.task,
+                    cancellation_token=cancellation_token
+                ))
+        finally:
+            # 清理工具管理器中的会话
+            await tool_manager.clear()
+            # 清理键盘监听器并恢复终端状态（仅对InteractiveTeam）
+            if hasattr(execution_team, 'stop_keyboard_listener'):
+                execution_team.stop_keyboard_listener()
+            # 使用终端管理器恢复终端状态
+            terminal_manager.restore_terminal()
+   
     except Exception as e:
+        await tool_manager.clear()
         console.print(f"[red]程序执行出错: {e}[/red]")
         import traceback
         if args.debug:

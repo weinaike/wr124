@@ -2,6 +2,7 @@
 工具管理模块
 负责MCP工具的注册、验证和管理
 """
+import asyncio
 import traceback
 import sys
 from typing import Dict, Any, List, Union, Callable
@@ -12,7 +13,8 @@ from .mcp import (
     mcp_server_tools,
     SseMcpToolAdapter,
     StdioMcpToolAdapter,
-    StreamableHttpMcpToolAdapter
+    StreamableHttpMcpToolAdapter, 
+    McpSessionManager
 )
 from rich.console import Console as RichConsole
 
@@ -22,6 +24,7 @@ class ToolManager:
     def __init__(self):
         self._tools: Dict[str, Any] = {}
         self._console = RichConsole()
+        self._mcp_session_manager = McpSessionManager()
     
     def add_context_tool(self, tools: List[StdioMcpToolAdapter]):
         """
@@ -37,6 +40,7 @@ class ToolManager:
 
     async def register_tools(
         self, 
+        name : str,
         param: Union[StdioServerParams, StreamableHttpServerParams, SseServerParams, Dict[str, Callable]]
     ) -> Dict[str, Any]:
         """
@@ -54,8 +58,10 @@ class ToolManager:
                 self._tools[k] = v
         else:
             # 注册MCP工具
+            client = None
             try:
-                tools = await mcp_server_tools(param)
+                client = await self._mcp_session_manager.create_session(name, param)
+                tools = await mcp_server_tools(param, session=client)
                 for tool in tools:
                     tool_name = tool.schema.get('name')
                     
@@ -64,9 +70,32 @@ class ToolManager:
                         continue
                         
                     self._tools[tool_name] = tool
+            except ConnectionError as e:
+                # 连接错误通常是配置问题或服务器问题
+                self._console.print(f"[red]🔌 连接 MCP 服务器失败 [{name}]: {e}[/red]")
+                
+                # 如果会话创建成功但连接失败，需要清理会话
+                if self._mcp_session_manager.has_session(name):
+                    try:
+                        await self._mcp_session_manager.close_session(name)
+                        self._console.print(f"[yellow]🔧 已清理失败的会话: {name}[/yellow]")
+                    except Exception:
+                        pass  # 忽略清理错误
+                        
             except Exception as e:
-                self._console.print(f"[red]⚠️  注册工具失败: {e}[/red]")
-                traceback.print_exc()
+                self._console.print(f"[red]⚠️  注册工具失败 [{name}]: {e}[/red]")
+                
+                # 如果会话创建成功但工具注册失败，需要清理会话
+                if client is not None and self._mcp_session_manager.has_session(name):
+                    try:
+                        await self._mcp_session_manager.close_session(name)
+                        self._console.print(f"[yellow]🔧 已清理失败的会话: {name}[/yellow]")
+                    except Exception as cleanup_err:
+                        self._console.print(f"[red]⚠️  清理会话失败: {cleanup_err}[/red]")
+                
+                # 只在调试模式下打印详细错误信息
+                if "--debug" in sys.argv:
+                    traceback.print_exc()
                 
         return self._tools
     
@@ -132,3 +161,40 @@ class ToolManager:
     def tools(self) -> Dict[str, Any]:
         """获取工具字典"""
         return self._tools.copy()
+    
+    async def clear(self):
+        """清除所有已注册的工具"""
+        self._tools.clear()
+        try:
+            await self._mcp_session_manager.close_all_sessions()
+        except Exception as e:
+            # Check if it's a common cleanup error
+            error_msg = str(e).lower()
+            common_cleanup_keywords = [
+                'cancel', 'cancelled', 'scope', 'generator', 'wouldblock', 
+                'subprocess', 'process', 'taskgroup'
+            ]
+            
+            is_common_error = any(keyword in error_msg for keyword in common_cleanup_keywords)
+            
+            if is_common_error:
+                # These are expected during cleanup, show less alarming message
+                self._console.print(f"[dim yellow]ℹ️  会话清理完成（正常的清理过程）[/dim yellow]")
+            else:
+                # Unexpected error, show warning
+                self._console.print(f"[yellow]⚠️  清理会话时出现错误: {e}[/yellow]")
+    
+    async def cleanup_session(self, session_id: str) -> bool:
+        """清理指定的会话"""
+        try:
+            return await self._mcp_session_manager.close_session(session_id)
+        except Exception as e:
+            self._console.print(f"[red]⚠️  清理会话 {session_id} 失败: {e}[/red]")
+            return False
+    
+    def get_session_info(self) -> dict:
+        """获取会话信息"""
+        return {
+            'active_sessions': self._mcp_session_manager.list_sessions(),
+            'session_count': len(self._mcp_session_manager)
+        }
