@@ -1,3 +1,4 @@
+from enum import Enum
 import os
 import asyncio
 import traceback
@@ -66,6 +67,18 @@ This is a note: It is not part of the task but can guide your work.
 5. if you encounter any issues or blockers, using the `search_agent` tool to look up internet resources can be a very effective way to address them.
 '''
 
+class STOP_REASON(str, Enum):
+    COMPLETED = "任务成功完成"
+    CANCELLED = "任务被用户取消"
+    TIMEOUT = "任务超时"
+    ERROR = "任务执行出错"
+    MAX_ITERATIONS = "达到次数上限"
+    EXTERNAL_TERMINATION = "外部终止信号"
+    EXIT = "用户主动退出"
+    INVALID_TASK = "无效任务"
+    UNKNOWN = "未知原因"
+
+
 class NoSystemUnboundedChatCompletionContext(UnboundedChatCompletionContext):
     """不包含系统消息的无界聊天上下文"""
     def remove_system_messages(self) -> None:
@@ -113,7 +126,7 @@ class BaseAgent(AssistantAgent):
         self._temrminate_word = KEYWORD
         self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
-        self._max_tokens = 100000   # token
+        self._max_tokens = 40000   # token
         self._max_compress_count = 3
         self._min_tool_count_to_summary = 20
         
@@ -217,7 +230,7 @@ class BaseAgent(AssistantAgent):
                 tool_count = 0  # 统计一次性调用工具次数，工具调用次数大于 self._min_tool_count_to_summary，进行一次总结，规划下一步动作，不足时不做处理
                 while True:
                     if cancellation_token.is_cancelled():
-                        stop_reason = "Cancelled by user"
+                        stop_reason = STOP_REASON.CANCELLED
                         break
                     if self._termination_condition.terminated or completed:
                         break
@@ -255,8 +268,9 @@ class BaseAgent(AssistantAgent):
                                     # Reset the termination conditions and turn count.
                                     await self._termination_condition.reset()
                                     completed = True
-                                    break                            
-                                
+                                    stop_reason=STOP_REASON.COMPLETED
+                                    break
+
                         else:
                             yield message
                             if isinstance(message, ModelClientStreamingChunkEvent):
@@ -270,13 +284,16 @@ class BaseAgent(AssistantAgent):
 
                     # 如果output_messages 计算token数量超过最大限制，则需要进行摘要，并将摘要作为新的输入
                     if models_usage.prompt_tokens > self._max_tokens:
-                        input_messages = input_messages_bak +  await self._compress_message(cancellation_token)
+                        summary = await self._compress_message(cancellation_token)
+                        input_messages = input_messages_bak + summary
                         models_usage = RequestUsage(0,0)        
                         await self.upload_state("compress history")
                         await self._model_context.clear() # 清空模型上下文，以便进行新的输入
                         compress_count += 1
                         if compress_count > self._max_compress_count:
                             self._console.print(f"[yellow]⚠️  压缩历史记录达到最大限制，停止[/yellow]")
+                            output_messages.extend(summary)
+                            stop_reason = STOP_REASON.MAX_ITERATIONS
                             break                    
 
                 yield TaskResult(messages=output_messages, stop_reason=stop_reason)
@@ -349,7 +366,7 @@ class BaseAgent(AssistantAgent):
                     return
 
 
-    async def _compress_message(self, cancellation_token: CancellationToken | None = None,):
+    async def _compress_message(self, cancellation_token: CancellationToken | None = None,) -> List[BaseChatMessage]:
         if cancellation_token is None:
             cancellation_token = CancellationToken()
 

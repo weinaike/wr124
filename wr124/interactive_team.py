@@ -11,7 +11,7 @@ from rich.console import Console as RichConsole
 
 from .agents.team_base import Team
 from .interaction_handler import InteractionHandler
-
+from .agents.agent_base import STOP_REASON
 
 class InteractiveTeam:
     """
@@ -68,7 +68,7 @@ class InteractiveTeam:
         # 获取初始任务
         current_task = await self._get_initial_task(task)
         if current_task is None:
-            yield TaskResult(messages=[], stop_reason="无有效任务")
+            yield TaskResult(messages=[], stop_reason=STOP_REASON.INVALID_TASK)
             return
         
         # 启动键盘监听器（在获取任务后）
@@ -114,14 +114,13 @@ class InteractiveTeam:
                 task_was_cancelled = False
             elif not self.is_interactive:
                 self._console.print("\n[yellow]任务完成，自动退出。[/yellow]")
-                yield TaskResult(messages=[], stop_reason="任务完成")
                 return
             
             # 交互模式：询问用户下一步操作
             action, next_task = await self.interaction_handler.handle_interactive_next()
             
             if action == 'exit':
-                yield TaskResult(messages=[], stop_reason="用户选择退出")
+                yield TaskResult(messages=[], stop_reason=STOP_REASON.EXIT)
                 return
             elif action == 'continue' and next_task:
                 current_task = next_task
@@ -132,7 +131,7 @@ class InteractiveTeam:
                     self.interaction_handler.update_cancellation_token(current_cancellation_token)
                 continue
             else:
-                yield TaskResult(messages=[], stop_reason="处理用户输入失败")
+                yield TaskResult(messages=[], stop_reason=STOP_REASON.INVALID_TASK)
                 return
     
     async def _get_initial_task(self, task) -> str | None:

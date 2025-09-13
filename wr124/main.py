@@ -8,6 +8,7 @@ import os
 import sys
 import asyncio
 from pathlib import Path
+from typing import AsyncGenerator
 import uuid
 from rich.console import Console as RichConsole
 from autogen_core import CancellationToken
@@ -22,28 +23,16 @@ from .telemetry_setup import TelemetrySetup, trace
 from .util import print_tools_info
 from .terminal_manager import TerminalManager  # 导入终端管理器
 from autogen_agentchat.ui import Console
+from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent
+from autogen_agentchat.base import TaskResult
 from .filesystem import tool_mapping
 from .session.session_state_manager import SessionStateManager, SessionParam
 from .mcp import create_mcp_server_session, mcp_server_tools
 
 
-async def main():
-    """主函数 - 重构版本，支持AgentParam配置"""
+async def run_team(args: argparse.Namespace) -> AsyncGenerator[BaseAgentEvent | BaseChatMessage | TaskResult, None]:
     # 立即初始化终端管理器，确保终端状态被保存
-    terminal_manager = TerminalManager.get_instance()    
-    
-    # 解析命令行参数
-    parser = argparse.ArgumentParser(description="运行Agent，执行指定任务。")
-    parser.add_argument("-t", "--task", type=str, help="要执行的任务（如未提供，将启用交互模式）")
-    parser.add_argument("-p", "--project_id", type=str, help="项目ID（如未提供，使用当前目录名）")
-    parser.add_argument("-e", "--env_file", type=str, help="环境变量文件路径")
-    parser.add_argument("-i", "--interactive", action="store_true", help="在任务完成后启用交互式用户输入")
-    parser.add_argument("-d", "--debug", action="store_true", help="启用调试模式")
-    parser.add_argument("-a", "--agent", type=str, help="Agent配置文件路径（支持markdown格式）")
-    parser.add_argument("-r", "--resume", action="store_true", help="是否从上次中断的地方恢复")
-    parser.add_argument("-s", "--session_id", type=str, help="会话ID")
-    parser.add_argument("-c", "--config_profile", type=str, help="配置文件中的配置档案名称")
-    args = parser.parse_args()
+    terminal_manager = TerminalManager.get_instance()      
     
     console = RichConsole()
     session_id = str(uuid.uuid4())
@@ -61,7 +50,7 @@ async def main():
         config_manager = ConfigManager(session_id=session_id, 
                                        env_file=args.env_file, 
                                        project_id=args.project_id,
-                                       config_profile=args.config_profile)
+                                       config_profile=args.config_file)
         
         # 初始化遥测
         telemetry = TelemetrySetup(config_manager.project_id)
@@ -125,12 +114,13 @@ async def main():
         
         try:
             # 执行任务
-
             with tracer.start_as_current_span(name=config_manager.session_id):
-                await Console(execution_team.run_stream(
+                async for message in execution_team.run_stream(
                     task=args.task,
                     cancellation_token=cancellation_token
-                ))
+                ):
+                    yield message
+
         finally:
             # 清理工具管理器中的会话
             await tool_manager.clear()
@@ -153,7 +143,23 @@ async def main():
 
 def run():
     """命令行脚本入口点"""
-    asyncio.run(main())
+        # 解析命令行参数
+    parser = argparse.ArgumentParser(description="运行Agent，执行指定任务。")
+    parser.add_argument("-t", "--task", type=str, help="要执行的任务（如未提供，将启用交互模式）")
+    parser.add_argument("-p", "--project_id", type=str, help="项目ID（如未提供，使用当前目录名）")
+    parser.add_argument("-e", "--env_file", type=str, help="环境变量文件路径")
+    parser.add_argument("-i", "--interactive", action="store_true", help="在任务完成后启用交互式用户输入")
+    parser.add_argument("-d", "--debug", action="store_true", help="启用调试模式")
+    parser.add_argument("-a", "--agent", type=str, help="Agent配置文件路径（支持markdown格式）")
+    parser.add_argument("-r", "--resume", action="store_true", help="是否从上次中断的地方恢复")
+    parser.add_argument("-s", "--session_id", type=str, help="会话ID")
+    parser.add_argument("-c", "--config_file", type=str, help="配置文件中的配置档案名称")
+    args = parser.parse_args()    
+
+    # 默认模式：直接使用Console处理
+    async def console_run():
+        await Console(run_team(args))
+    asyncio.run(console_run())
 
 if __name__ == "__main__":
     run()
