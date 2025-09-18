@@ -48,19 +48,26 @@ class SessionStateManager:
         self.project_id = prm.project_id
         self.timeout = prm.timeout
         self.enabled = False
+        self._connect = False
         if self.health_check():
             self.enabled = True
             self.console.print(f"[dim]✓ 会话管理服务正常: {self.session_id}[/dim]")
-    
-    def health_check(self):          
-        url = f"{self.api_url}/health"
-        req = urllib.request.Request(url)        
-        with urllib.request.urlopen(req, timeout=self.timeout) as response:
-            if response.status == 200:
-                return True
-            else:
-                return False
+            self._connect = True
+    def is_connected(self) -> bool:
+        return self._connect
 
+    def health_check(self):
+        try:
+            url = f"{self.api_url}/health"
+            req = urllib.request.Request(url)        
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                if response.status == 200:
+                    return True
+                else:
+                    return False
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️  会话管理服务不可用: {str(e)}[/yellow]")
+            return False
 
     async def upload_session_state(
         self, 

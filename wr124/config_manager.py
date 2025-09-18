@@ -161,12 +161,13 @@ class ConfigManager:
                 self.config_profile = path2
                 print(f"Using config profile: {self.config_profile}")
 
-        if not self.config_profile:
-            raise ValueError("No configuration profile found. Please provide a valid config file.")
-        with open(self.config_profile) as f:
-            base_config = json.load(f)
-
-        self.config = WR124Config(**base_config)
+        if self.config_profile:            
+            with open(self.config_profile) as f:
+                base_config = json.load(f)
+            self.config = WR124Config(**base_config)
+        else:
+            print("No configuration profile found.")
+            self.config = WR124Config()
     
     def get_model_client(self, model: Optional[str] = None) -> OpenAIChatCompletionClient:
         """创建模型客户端"""

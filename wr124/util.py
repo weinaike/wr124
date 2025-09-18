@@ -34,13 +34,7 @@ def ensure_terminal_ready_for_input():
             
             # 设置UTF-8编码
             os.environ['LANG'] = os.environ.get('LANG', 'en_US.UTF-8')
-            os.environ['LC_ALL'] = os.environ.get('LC_ALL', 'en_US.UTF-8')
-            
-            # 重新配置标准输入输出的编码
-            if hasattr(sys.stdout, 'reconfigure'):
-                sys.stdout.reconfigure(encoding='utf-8')
-            if hasattr(sys.stdin, 'reconfigure'):
-                sys.stdin.reconfigure(encoding='utf-8')
+            os.environ['LC_ALL'] = os.environ.get('LC_ALL', 'en_US.UTF-8')            
                 
         except Exception:
             # 备用方案

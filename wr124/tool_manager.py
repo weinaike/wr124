@@ -72,7 +72,7 @@ class ToolManager:
                     self._tools[tool_name] = tool
             except ConnectionError as e:
                 # 连接错误通常是配置问题或服务器问题
-                self._console.print(f"[red]🔌 连接 MCP 服务器失败 [{name}]: {e}[/red]")
+                self._console.print(f"[red]🔌 `{name}` 连接 MCP 服务器失败 : {e}[/red]")
                 
                 # 如果会话创建成功但连接失败，需要清理会话
                 if self._mcp_session_manager.has_session(name):
@@ -83,7 +83,7 @@ class ToolManager:
                         pass  # 忽略清理错误
                         
             except Exception as e:
-                self._console.print(f"[red]⚠️  注册工具失败 [{name}]: {e}[/red]")
+                self._console.print(f"[red]⚠️  `{name}`工具注册失败: {e}[/red]")
                 
                 # 如果会话创建成功但工具注册失败，需要清理会话
                 if client is not None and self._mcp_session_manager.has_session(name):

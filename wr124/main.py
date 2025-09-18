@@ -80,7 +80,8 @@ async def run_team(args: argparse.Namespace) -> AsyncGenerator[BaseAgentEvent | 
         parm = config_manager.get_session_server()
         if parm is not None:
             manager = SessionStateManager(parm)
-            team.register_state_manager(manager)
+            if manager.is_connected():
+                team.register_state_manager(manager)
 
         # 第三步：根据参数设置主智能体
         if args.agent:

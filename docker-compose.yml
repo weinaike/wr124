@@ -29,7 +29,7 @@ services:
   shrimp-app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ./docker/Dockerfile
     container_name: shrimp-app
     restart: unless-stopped
     ports:
