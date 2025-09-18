@@ -5,7 +5,7 @@ from typing import AsyncGenerator, Sequence, Optional, List
 import asyncio
 
 from autogen_core import CancellationToken
-from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, TextMessage
+from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, BaseTextChatMessage
 from autogen_agentchat.base import TaskResult
 from rich.console import Console as RichConsole
 
@@ -31,9 +31,9 @@ class InteractiveTeam:
         """获取工具信息"""
         return self.team.get_tools_info()
     
-    def set_main_agent(self, agent_param=None, markdown_file=None):
+    def set_main_agent(self, agent_param=None):
         """设置主智能体"""
-        return self.team.set_main_agent(agent_param, markdown_file)
+        return self.team.set_main_agent(agent_param)
     
     def enable_interactive_mode(self, use_default_callback: bool = True) -> None:
         """启用交互模式"""
@@ -140,7 +140,7 @@ class InteractiveTeam:
             # 将任务转换为字符串
             if isinstance(task, str):
                 return task
-            elif isinstance(task, BaseChatMessage):
+            elif isinstance(task, BaseTextChatMessage):
                 return str(task.content) if hasattr(task, 'content') else str(task)
             elif isinstance(task, Sequence):
                 return ' '.join(str(t) for t in task)

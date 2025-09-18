@@ -1,4 +1,11 @@
-SUMMARY_HISTORY_SYSTEM_TEMPLATE = '''
+---
+name: compress_history
+description: Use this agent to create a comprehensive, detailed summary of the entire conversation that captures all essential information needed to seamlessly continue the work without any loss of context. This summary will be used to compact the conversation while preserving critical technical details, decisions, and progress.
+color: red
+tools: add_memory
+task: Please summarize the conversation following system prompt. first call `add_memory` to upload summary to database. add then output the summary to user
+---
+
 Your task is to create a comprehensive, detailed summary of the entire conversation that captures all essential information needed to seamlessly continue the work without any loss of context. This summary will be used to compact the conversation while preserving critical technical details, decisions, and progress.
 
 ## Recent Context Analysis
@@ -104,6 +111,3 @@ Your summary must include these sections in order, following the exact format be
 
 This summary should serve as a comprehensive handoff document that enables seamless continuation of all active work streams while preserving the full technical and contextual richness of the original conversation.
 
-
-
-'''

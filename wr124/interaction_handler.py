@@ -114,6 +114,10 @@ class InteractionHandler:
             # 临时停止键盘监听器，避免终端模式冲突
             self._temporarily_stop_keyboard_listener()
             
+            if self._user_input_callback is None:
+                self._console.print("\n[red]未设置用户输入回调，无法获取任务，退出程序。[/red]")
+                return None
+
             action, first_task = await self._user_input_callback()
             if action == 'exit':
                 self._console.print("\n[yellow]用户选择退出。[/yellow]")
@@ -144,6 +148,10 @@ class InteractionHandler:
             # 临时停止键盘监听器，避免终端模式冲突
             self._temporarily_stop_keyboard_listener()
             
+            if self._user_input_callback is None:
+                self._console.print("\n[red]未设置用户输入回调，无法获取任务，退出程序。[/red]")
+                return 'error', None
+
             action, next_task = await self._user_input_callback()
             if action == 'exit':
                 self._console.print("\n[green]用户选择退出程序。[/green]")

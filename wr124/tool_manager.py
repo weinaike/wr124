@@ -56,7 +56,7 @@ class ToolManager:
             # 直接注册函数工具
             for k, v in param.items():
                 self._tools[k] = v
-        else:
+        elif isinstance(param, (StdioServerParams, StreamableHttpServerParams, SseServerParams)):
             # 注册MCP工具
             client = None
             try:

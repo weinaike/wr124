@@ -36,6 +36,8 @@ class TelemetrySetup:
         global _global_initialized, _global_instrumentor_initialized
         
         if self._initialized:
+            if self.tracer is None:
+                raise RuntimeError("Tracer is not initialized.")
             return self.tracer
         
         # 只有在全局未初始化时才设置TracerProvider
@@ -53,7 +55,7 @@ class TelemetrySetup:
                 
                 # 检查是否已经有TracerProvider，如果没有才设置
                 current_provider = trace.get_tracer_provider()
-                if not hasattr(current_provider, '_resource') or current_provider._resource is None:
+                if not isinstance(current_provider, TracerProvider):
                     trace.set_tracer_provider(tracer_provider)
                 
                 _global_initialized = True
@@ -90,10 +92,13 @@ class TelemetrySetup:
         Returns:
             跟踪跨度上下文管理器
         """
-        if not self._initialized:
-            self.initialize()
+        if not self._initialized or self.tracer is None:
+            self.tracer = self.initialize()
         
         if session_id is None:
             session_id = str(uuid.uuid4())
+        
+        if self.tracer is None:
+            raise RuntimeError("Tracer is not initialized.")
         
         return self.tracer.start_as_current_span(name=session_id)

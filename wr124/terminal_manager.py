@@ -128,12 +128,6 @@ class TerminalManager:
             # 确保终端处于标准输入模式
             subprocess.run(['stty', 'echo', 'icanon'], 
                          check=False, stderr=subprocess.DEVNULL)
-            
-            # 确保UTF-8编码设置
-            if hasattr(sys.stdout, 'reconfigure'):
-                sys.stdout.reconfigure(encoding='utf-8')
-            if hasattr(sys.stdin, 'reconfigure'):
-                sys.stdin.reconfigure(encoding='utf-8')
                 
         except Exception:
             pass

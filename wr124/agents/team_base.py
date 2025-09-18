@@ -9,84 +9,17 @@ from pathlib import Path
 
 from autogen_core import CancellationToken
 from autogen_core.models import ChatCompletionClient, ModelInfo, ModelFamily
-from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, TextMessage
+from autogen_agentchat.messages import BaseChatMessage, BaseAgentEvent, TextMessage, BaseTextChatMessage
 from autogen_agentchat.base import TaskResult
 from autogen_agentchat.tools import AgentTool
 from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.openai import OpenAIChatCompletionClient
 from rich.console import Console as RichConsole
-from pydantic import BaseModel, Field
-import yaml
+
 from .agent_base import BaseAgent, STOP_PROMPT
 from ..mcp import StdioServerParams, mcp_server_tools
 from ..session import SessionStateManager, SessionStateStatus
-
-
-
-class AgentParam(BaseModel):
-    name: str = Field(..., description="The name of the agent")
-    description: str = Field(..., description="A brief description of the agent")
-    prompt: str = Field(..., description="The prompt to initiate the agent's behavior")
-    model: Optional[str] = Field(None, description="The model used by the agent")
-    color: Optional[str] = Field(None, description="The color associated with the agent")
-    tools: List[str] = Field([], description="A list of tools available to the agent")
-
-
-
-def parse_agent_markdown(file_path: str) -> AgentParam:
-    """
-    Parse an agent markdown file and convert it to a simplified dictionary.
-    
-    Args:
-        file_path: Path to the markdown file
-        
-    Returns:
-        Dictionary with fields: name, description, model, color, tools, prompt
-    """
-    with open(file_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    # Split content into frontmatter and body
-    parts = content.split('---', 2)
-    
-    if len(parts) < 3:
-        raise ValueError("Invalid markdown format: missing frontmatter")
-    
-    # Parse frontmatter (YAML)
-    frontmatter_text = parts[1].strip()
-    try:
-        frontmatter = yaml.safe_load(frontmatter_text)
-    except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML frontmatter: {e}")
-    
-    # Parse body content (everything after frontmatter becomes prompt)
-    prompt = parts[2].strip()
-    
-    # Parse tools from frontmatter
-    tools_str = frontmatter.get('tools', None)
-    if isinstance(tools_str, str):
-        # Split by comma and clean up whitespace
-        tools = [tool.strip() for tool in tools_str.split(',') if tool.strip()]
-    elif isinstance(tools_str, list):
-        tools = tools_str
-    else:
-        tools = []
-
-    # 处理名称，确保是有效的Python标识符
-    name = frontmatter.get('name', '')
-    # 将连字符替换为下划线，确保名称符合Python标识符规则
-    name = name.replace('-', '_')
-
-    result = AgentParam(
-        name=name,
-        description=frontmatter.get('description', ''),
-        model=frontmatter.get('model', None),
-        color=frontmatter.get('color', None),
-        tools=tools,
-        prompt=prompt
-    )
-
-    return result
+from .agent_param import AgentParam, parse_agent_markdown
 
 
 class Team:
@@ -125,7 +58,7 @@ class Team:
             self._main_agent.register_session_manager(manager)
         self._console.print(f"[green]✓ 启动会话管理: {manager.session_id}[/green]")
 
-    async def set_enable_search_agent_tool(self, param: Optional[StdioServerParams] = None) -> AgentTool:
+    async def set_enable_search_agent_tool(self, param: Optional[StdioServerParams] = None) -> Optional[AgentTool]:
         if param is None:
             param = StdioServerParams(
                 command='npx',
@@ -139,14 +72,14 @@ class Team:
                 }
             )
         tools = await mcp_server_tools(param)
-        config_path = Path(__file__).parent / "preset_agents" / "search_agent.md"
+        config_path = str(Path(__file__).parent / "preset_agents" / "search_agent.md") 
         agent_param = parse_agent_markdown(config_path)
         agent = AssistantAgent(
             name=agent_param.name,
             model_client=self._model_client,
             description=agent_param.description,
             system_message=agent_param.prompt,
-            tools=tools,
+            tools=list(tools) if tools else None,
             max_tool_iterations=40,
         )
         tool = AgentTool(agent, return_value_as_last_message=True)
@@ -167,7 +100,14 @@ class Team:
                     name="general_assistant",
                     description="A general purpose assistant",
                     prompt="You are a helpful assistant. Please be concise and helpful.",
-                    tools=[]
+                    tools=[],
+                    model=None,
+                    color=None,
+                    max_tokens=None,
+                    max_compress_count=None,
+                    max_tool_iterations=None,
+                    hook_agents=None,
+                    task=None,
                 )
                 self._console.print("[dim]✓ 使用硬编码的默认智能体配置[/dim]")
         except Exception as e:
@@ -176,7 +116,14 @@ class Team:
                 name="fallback_assistant",
                 description="Fallback assistant configuration",
                 prompt="You are a helpful assistant.",
-                tools=[]
+                tools=[],
+                model=None,
+                color=None,
+                max_tokens=None,
+                max_compress_count=None,
+                max_tool_iterations=None,
+                hook_agents=None,
+                task=None,
             )
             self._console.print(f"[yellow]⚠️  加载默认配置失败，使用备用配置: {e}[/yellow]")
     
@@ -252,6 +199,23 @@ class Team:
                     structured_output=True,
                 )
             )
+
+        hook_agents = []
+        for hook_agent_name in agent_param.hook_agents or []:
+            config_path = Path(hook_agent_name)
+            if config_path.exists():
+                try:
+                    hook_agent_param = parse_agent_markdown(str(config_path))
+                    hook_agents.append(hook_agent_param)
+                    self._console.print(f"[dim]✓ 加载挂钩智能体: {hook_agent_param.name}[/dim]")
+                except Exception as e:
+                    self._console.print(f"[yellow]⚠️  加载挂钩智能体失败 ({hook_agent_name}): {e}[/yellow]")
+            else:
+                self._console.print(f"[yellow]⚠️  挂钩智能体配置文件不存在: {hook_agent_name}[/yellow]")
+
+        compress_file_path = str(Path(__file__).parent / "preset_agents" / "compress_history.md")
+        compress_agent_param = parse_agent_markdown(compress_file_path)
+        
         # 创建agent
         agent = BaseAgent(
             name=agent_param.name,
@@ -260,7 +224,11 @@ class Team:
             system_message=system_prompt,
             tools=tools,
             reflect_on_tool_use=False,
-            max_tool_iterations=40
+            max_tool_iterations=agent_param.max_tool_iterations if agent_param.max_tool_iterations is not None else 5,
+            max_tokens=agent_param.max_tokens if agent_param.max_tokens is not None else 40000,
+            max_compress_count=agent_param.max_compress_count,
+            hook_agents=hook_agents,
+            compress_agent=compress_agent_param if agent_param.max_compress_count else None
         )
         
         # 设置颜色属性
@@ -277,6 +245,8 @@ class Team:
             agent_param: 智能体参数，如果为None则使用默认配置
         """
         if agent_param is None:
+            if self._default_agent_config is None:
+                raise RuntimeError("默认智能体配置未加载")
             agent_param = self._default_agent_config
         
         # 创建智能体，工具会在_create_agent_from_param中自动筛选
@@ -445,7 +415,7 @@ class Team:
         # 将任务转换为字符串
         if isinstance(task, str):
             task_str = task
-        elif isinstance(task, BaseChatMessage):
+        elif isinstance(task, BaseTextChatMessage):
             task_str = str(task.content) if hasattr(task, 'content') else str(task)
         elif isinstance(task, Sequence):
             task_str = ' '.join(str(t) for t in task)

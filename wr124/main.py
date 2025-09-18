@@ -69,6 +69,7 @@ async def run_team(args: argparse.Namespace) -> AsyncGenerator[BaseAgentEvent | 
 
         await team.set_enable_search_agent_tool()
         # 注册工具
+        tools={}
         for name, parm in mcp_servers.items():
             tools = await tool_manager.register_tools(name, parm)
         print_tools_info(tools, debug=args.debug)
@@ -125,13 +126,12 @@ async def run_team(args: argparse.Namespace) -> AsyncGenerator[BaseAgentEvent | 
             # 清理工具管理器中的会话
             await tool_manager.clear()
             # 清理键盘监听器并恢复终端状态（仅对InteractiveTeam）
-            if hasattr(execution_team, 'stop_keyboard_listener'):
+            if isinstance(execution_team, InteractiveTeam):
                 execution_team.stop_keyboard_listener()
             # 使用终端管理器恢复终端状态
             terminal_manager.restore_terminal()
    
     except Exception as e:
-        await tool_manager.clear()
         console.print(f"[red]程序执行出错: {e}[/red]")
         import traceback
         if args.debug:

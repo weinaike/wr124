@@ -21,10 +21,7 @@ RUN apt-get update && apt-get install -y \
 
 # Create app directory
 WORKDIR /app
-
-# Copy Python dependencies and install
-COPY pyproject.toml ./
-COPY shrimp/ ./shrimp/
+COPY shrimp/ ./
 
 RUN pip config set global.index-url http://mirrors.aliyun.com/pypi/simple/ && \
     pip config set global.trusted-host mirrors.aliyun.com 

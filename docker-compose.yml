@@ -41,7 +41,7 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - MONGO_URI=mongodb://mongodb:27017
-      - DATABASE_NAME=mcp_test_db
+      - DATABASE_NAME=mcp_hard_cpp_build_db
       - HOST=0.0.0.0
       - PORT=4444
       - DEBUG=false

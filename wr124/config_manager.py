@@ -107,9 +107,9 @@ class WR124Config(BaseModel):
 class ConfigManager:
     """配置管理器 - 基于配置文件"""
     
-    def __init__(self, session_id: Optional[str],
+    def __init__(self, session_id: str,
+                project_id: str,
                  env_file: Optional[str] = None, 
-                 project_id: Optional[str] = None,
                  config_profile: Optional[str] = None):
         """
         Initialize configuration manager
@@ -161,6 +161,8 @@ class ConfigManager:
                 self.config_profile = path2
                 print(f"Using config profile: {self.config_profile}")
 
+        if not self.config_profile:
+            raise ValueError("No configuration profile found. Please provide a valid config file.")
         with open(self.config_profile) as f:
             base_config = json.load(f)
 
@@ -168,9 +170,7 @@ class ConfigManager:
     
     def get_model_client(self, model: Optional[str] = None) -> OpenAIChatCompletionClient:
         """创建模型客户端"""
-        model_config = ModelConfig(model=os.getenv("WR124_DEFAULT_MODEL", "glm-4.5"), 
-                                   base_url=os.getenv("OPENAI_BASE_URL", None), 
-                                   api_key=os.getenv("OPENAI_API_KEY", None))
+        model_config = ModelConfig(name=os.getenv("WR124_DEFAULT_MODEL", "glm-4.5"))
 
         if self.config.model:          
             model_config = self.config.model
@@ -183,8 +183,8 @@ class ConfigManager:
             timeout=model_config.timeout,
             temperature=model_config.temperature,
             max_retries=model_config.max_retries,
-            api_key=model_config.api_key,
-            base_url=model_config.base_url,
+            api_key=model_config.api_key if model_config.api_key else os.getenv("OPENAI_API_KEY",' '),
+            base_url=model_config.base_url if model_config.base_url else os.getenv("OPENAI_BASE_URL",' '),
             model_info=ModelInfo(
                 vision=model_config.vision,
                 function_calling=model_config.function_calling,
@@ -201,6 +201,8 @@ class ConfigManager:
         server_type = server_config.type or server_config.infer_server_type()
         
         if server_type == MCPServerType.STDIO:
+            if not server_config.command:
+                raise ValueError("Command is required for stdio server type")
             return StdioServerParams(
                 command=server_config.command,
                 args=server_config.args or [],
@@ -208,6 +210,8 @@ class ConfigManager:
                 env=server_config.env or {}
             )
         elif server_type == MCPServerType.STREAMABLE_HTTP:
+            if not server_config.url:
+                raise ValueError("URL is required for streamable_http server type")
             return StreamableHttpServerParams(
                 url=server_config.url,
                 headers=server_config.headers,
@@ -215,6 +219,8 @@ class ConfigManager:
                 timeout=server_config.timeout or 30
             )
         elif server_type == MCPServerType.SSE:
+            if not server_config.url:
+                raise ValueError("URL is required for sse server type")
             return SseServerParams(
                 url=server_config.url,
                 headers=server_config.headers,
@@ -249,8 +255,10 @@ class ConfigManager:
             }
         )
         
-        for server_name, server_config in self.config.mcpServers.items():
-            if server_name not in self.config.allowedMcpServers:
+        mcp_servers = self.config.mcpServers or {}
+        allowed_servers = self.config.allowedMcpServers or []
+        for server_name, server_config in mcp_servers.items():
+            if server_name not in allowed_servers:
                 print(f"Warning: MCP server '{server_name}' is not in allowedMcpServers, skipping.")
                 continue
             try:

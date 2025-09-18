@@ -35,17 +35,15 @@ from autogen_core.models import (
     SystemMessage,
     AssistantMessage    
 )
-from rich.console import Console
+
+from rich.console import Console as RichConsole
 
 from ..session.session_state_manager import SessionStateManager, SessionStateStatus
-
+from .agent_param import AgentParam
 # 处理相对导入问题 - 支持直接运行和作为模块导入
 try:
-    from .prompt_compress import SUMMARY_HISTORY_SYSTEM_TEMPLATE
     from .memory_recorder import MemoryRecorder
 except ImportError:
-    # 当直接运行此文件时，使用绝对导入
-    from wr124.agents.prompt_compress import SUMMARY_HISTORY_SYSTEM_TEMPLATE
     from wr124.agents.memory_recorder import MemoryRecorder
 
 KEYWORD = "_I_HAVE_COMPLETED_"
@@ -97,7 +95,11 @@ class BaseAgent(AssistantAgent):
         reflect_on_tool_use: bool | None = None,
         memory: Sequence[Memory] | None = None,
         enable_memory_recording: bool = False,
-        max_tool_iterations=1,
+        max_tool_iterations=40,
+        max_tokens: int = 40000,
+        max_compress_count: Optional[int] = None,
+        hook_agents: Optional[List[AgentParam]] = None,
+        compress_agent: Optional[AgentParam] = None,
         **kwargs,
     ) -> None:
        
@@ -126,12 +128,18 @@ class BaseAgent(AssistantAgent):
         self._temrminate_word = KEYWORD
         self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
-        self._max_tokens = 40000   # token
-        self._max_compress_count = 3
+        self._max_tokens = max_tokens   # token
         self._min_tool_count_to_summary = 20
-        
+
+
+        self._max_compress_count = max_compress_count if max_compress_count is not None else 0  # 压缩次数
+         # 压缩agent
+        self._compress_agent_param = compress_agent
+               
         # Rich console for beautiful output
-        self._console = Console()
+        self._hook_agents = hook_agents if hook_agents is not None else []
+
+        self._console = RichConsole()
         
         # 记忆记录功能
         self._enable_memory_recording = enable_memory_recording
@@ -153,6 +161,7 @@ class BaseAgent(AssistantAgent):
 
     async def run(
         self,
+        *,
         task: str | BaseChatMessage | Sequence[BaseChatMessage] | None = None,
         cancellation_token: CancellationToken | None = None,
         output_task_messages: bool = True,
@@ -222,7 +231,7 @@ class BaseAgent(AssistantAgent):
                             raise ValueError(f"Invalid message type in sequence: {type(msg)}")
                 input_messages_bak = input_messages.copy()
                 models_usage = RequestUsage(0,0)
-                stop_reason: StopMessage | None = None
+                stop_reason: str = STOP_REASON.UNKNOWN
                 completed = False
                 trigger_summary = False
                 skip_stop = False  # 结束关键词跳过
@@ -284,26 +293,26 @@ class BaseAgent(AssistantAgent):
 
                     # 如果output_messages 计算token数量超过最大限制，则需要进行摘要，并将摘要作为新的输入
                     if models_usage.prompt_tokens > self._max_tokens:
-                        summary = await self._compress_message(cancellation_token)
-                        input_messages = input_messages_bak + summary
-                        models_usage = RequestUsage(0,0)        
-                        await self.upload_state("compress history")
-                        await self._model_context.clear() # 清空模型上下文，以便进行新的输入
                         compress_count += 1
                         if compress_count > self._max_compress_count:
-                            self._console.print(f"[yellow]⚠️  压缩历史记录达到最大限制，停止[/yellow]")
-                            output_messages.extend(summary)
+                            self._console.print(f"[yellow]⚠️  token压缩次数超过上限{self._max_compress_count}，停止[/yellow]")
                             stop_reason = STOP_REASON.MAX_ITERATIONS
-                            break                    
+
+                            break
+                        summary = await self._compress_message(cancellation_token)
+                        input_messages = input_messages_bak + summary
+                        models_usage = RequestUsage(0,0)
+                        await self.upload_state("compress history")                                                
+                        await self._model_context.clear() # 清空模型上下文，以便进行新的输入               
 
                 yield TaskResult(messages=output_messages, stop_reason=stop_reason)
             
             finally:
                 await self._cleanup_memory_task()
-                # 更新文档， 暂时不生效， 写入那些内容，写到哪里，以及何时取用需要预先设定。
-                # await self._update_document()
+                await self._hook_agents_run(cancellation_token)
 
-    async def on_messages_stream(self, input_messages: list[BaseChatMessage], cancellation_token: CancellationToken | None = None
+
+    async def on_messages_stream(self, messages: Sequence[BaseChatMessage], cancellation_token: CancellationToken
                                  )-> AsyncGenerator[Union[BaseAgentEvent, BaseChatMessage, Response], None]:
         """
         重载底层AssitantAgent的on_messages_stream方法, 主要添加工具调用失败后重试功能
@@ -316,7 +325,7 @@ class BaseAgent(AssistantAgent):
         attempt = 0
         while(attempt <= max_retries):       
             try:
-                async for message in super().on_messages_stream(input_messages, cancellation_token):
+                async for message in super().on_messages_stream(messages, cancellation_token):
                     if isinstance(message, MemoryQueryEvent) :
                         continue
                     if isinstance(message, ToolCallExecutionEvent):
@@ -350,7 +359,7 @@ class BaseAgent(AssistantAgent):
                 
                 error_detail = traceback.format_exc()
                 content = f"遇到一个错误，请确认工具调用参数格式都正确。问题如下:\n{str(e)}\n{error_detail}"
-                input_messages = [TextMessage(content=content, source='user')]
+                messages = [TextMessage(content=content, source='user')]
 
                 # 如果是最后一次尝试，抛出异常
                 if attempt >= max_retries:
@@ -366,32 +375,63 @@ class BaseAgent(AssistantAgent):
                     return
 
 
+    async def _hook_agents_run(self, cancellation_token: CancellationToken) -> List[BaseChatMessage]:
+        """运行挂钩智能体，返回它们的输出消息列表"""
+        all_hook_messages: List[BaseChatMessage] = []
+        for agent_param in self._hook_agents:
+            if agent_param.task is None:
+                self._console.print(f"[yellow]⚠️  挂钩智能体 {agent_param.name} 未配置任务，跳过[/yellow]")
+                continue
+            try:
+                hook_agent = AssistantAgent(
+                    name=agent_param.name,
+                    model_client=self._model_client,
+                    description=agent_param.description,
+                    system_message=agent_param.prompt,
+                    tools=self._tools,
+                    reflect_on_tool_use=False,
+                    max_tool_iterations=agent_param.max_tool_iterations if agent_param.max_tool_iterations is not None else 5,
+                )
+                self._console.print(f"[cyan]🤖 Running hook agent: {agent_param.name}[/cyan]")
+                response = await hook_agent.on_messages(messages=[TextMessage(content=agent_param.task,source='user')], cancellation_token=cancellation_token)
+                all_hook_messages.append(response.chat_message)
+            except Exception as e:
+                self._console.print(f"[red]Error running hook agent {agent_param.name}: {e}[/red]")
+        return all_hook_messages
+
+
+
     async def _compress_message(self, cancellation_token: CancellationToken | None = None,) -> List[BaseChatMessage]:
+        if self._compress_agent_param is None:
+            self._console.print(f"[yellow]⚠️  压缩Agent未配置，无法压缩上下文，跳过[/yellow]")
+            return []
+
         if cancellation_token is None:
             cancellation_token = CancellationToken()
 
-        tool_name = 'add_memory'
         filtered_tools = []
         
-        for tool in self._tools:
-            # 检查工具名称匹配
-            if (hasattr(tool, 'name') and tool.name == tool_name) or \
-                (hasattr(tool, '__name__') and tool.__name__ == tool_name) or \
-                (hasattr(tool, 'schema') and tool.schema.get('name') == tool_name):
-                filtered_tools.append(tool)
-                break
+        for tool_name in self._compress_agent_param.tools:
+            for tool in self._tools:
+                if (hasattr(tool, 'name') and tool.name == tool_name) or \
+                    (hasattr(tool, '__name__') and tool.__name__ == tool_name) or \
+                    (hasattr(tool, 'schema') and tool.schema.get('name') == tool_name):
+                    filtered_tools.append(tool)
+                    break
+        if len(filtered_tools) != len(self._compress_agent_param.tools):
+            self._console.print(f"[yellow]⚠️  部分压缩Agent工具未找到，检查工具名称是否正确。期望工具: {self._compress_agent_param.tools}, 实际工具: {[tool.name if hasattr(tool, 'name') else (tool.__name__ if hasattr(tool, '__name__') else tool.schema.get('name') if hasattr(tool, 'schema') else str(tool)) for tool in filtered_tools]}[/yellow]")
 
         compress_agent = AssistantAgent(
             name=f'{self.name}_compressor',
             model_client=self._model_client,
-            description="A compressor agent for tasks.",
-            system_message=SUMMARY_HISTORY_SYSTEM_TEMPLATE,
+            description=self._compress_agent_param.description,
+            system_message=self._compress_agent_param.prompt,
             model_context=self._model_context,
             tools=filtered_tools,
-            max_tool_iterations=5
+            max_tool_iterations=self._compress_agent_param.max_tool_iterations if self._compress_agent_param.max_tool_iterations is not None else 5,
         )
         msg = TextMessage(
-            content="Please summarize the conversation following system prompt. first call `add_memory` to upload summary to database. add then output the summary to user",
+            content=self._compress_agent_param.task if self._compress_agent_param.task else "Please summarize the conversation following system prompt. first call `add_memory` to upload summary to database. add then output the summary to user",
             source="user",
         )
 
@@ -449,22 +489,17 @@ class BaseAgent(AssistantAgent):
         if self._session_manager:
             ret, state = await self._session_manager.restore_agent_session_state(self.name)
             if ret == SessionStateStatus.SUCCESS:
-                await self.load_state(state)
+                if isinstance(state, dict):
+                    await self.load_state(state)
                 return
             else:
                 ret, state = await self._session_manager.restore_latest_session_state(self.name)
                 if ret == SessionStateStatus.SUCCESS:
-                    await self.load_state(state)
+                    if isinstance(state, dict):
+                        await self.load_state(state)
                     return
                 else:
                     return
-            
-    async def _update_document(self):
-        # 什么时候要更新文档：
-        # 1. 新增新特性， 2. 有获取新知识， 3. 上下文压缩时，历史消除， 这个时候更新历史文档（压缩时已经调用add_memory上传）
-        cancellation_token = CancellationToken()
-        msg = TextMessage(content="Please update your knowledge document in Agent.md if you have new information or features to add. If no updates are needed, respond with 'No updates needed'.", source="user")
-        await self.on_messages([msg], cancellation_token=cancellation_token)
 
 if __name__ == "__main__":
     from autogen_ext.models.openai import OpenAIChatCompletionClient
