@@ -4,3 +4,6 @@
 [submodule "frontend"]
 	path = frontend
 	url = git@github.com:weinaike/shrimp-frontend.git
+[submodule "cpp_build_new"]
+	path = cpp_build_new
+	url = git@github.com:weinaike/cpp_build.git

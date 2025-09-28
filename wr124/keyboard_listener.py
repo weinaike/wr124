@@ -1,5 +1,11 @@
 """
 键盘监听工具，用于监听ESC键中断执行
+
+修复说明：
+- 区分真正的ESC按键和ANSI转义序列（如鼠标滚动产生的 ^[[A）
+- ANSI转义序列以ESC字符开始，后面紧跟其他字符
+- 真正的ESC按键是单独的ESC字符，后面没有紧跟其他字符
+- 使用短暂的超时检查来区分这两种情况
 """
 import asyncio
 import sys
@@ -52,7 +58,19 @@ class AsyncKeyboardListener:
                         timeout=0.5  # 增加超时时间
                     )
                     
-                    if char and ord(char) == 27:  # ESC键
+                    if char and ord(char) == 27:  # ESC字符
+                        # 检查是否为ANSI转义序列的开始
+                        if select.select([sys.stdin], [], [], 0.5) != ([], [], []):
+                            # 有后续字符，可能是ANSI转义序列，消耗掉这些字符
+                            try:
+                                # 读取并丢弃ANSI转义序列的其余部分
+                                while select.select([sys.stdin], [], [], 0.1) != ([], [], []):
+                                    sys.stdin.read(1)
+                            except:
+                                pass
+                            continue  # 不处理ANSI转义序列，继续监听
+                        
+                        # 没有后续字符，是真正的ESC按键
                         self.console.print("\n[yellow]⏸️  检测到 ESC 键，正在中断任务...[/yellow]")
                         if self._cancellation_source:
                             self._cancellation_source.cancel()
@@ -72,7 +90,7 @@ class AsyncKeyboardListener:
             self._restore_terminal()
     
     def _read_single_char(self) -> Optional[str]:
-        """在线程中读取单个字符，使用非阻塞模式"""
+        """在线程中读取单个字符，使用非阻塞模式，能区分ESC键和ANSI转义序列"""
         try:
             # 检查是否有输入可读
             if select.select([sys.stdin], [], [], 0) == ([], [], []):
@@ -85,6 +103,21 @@ class AsyncKeyboardListener:
             try:
                 tty.setraw(sys.stdin.fileno())
                 char = sys.stdin.read(1)
+                
+                # 如果是ESC字符，检查是否为ANSI转义序列的开始
+                if ord(char) == 27:
+                    # 短暂等待检查是否有后续字符（ANSI转义序列）
+                    if select.select([sys.stdin], [], [], 0.05) != ([], [], []):
+                        # 有后续字符，可能是ANSI转义序列，消耗掉这些字符
+                        try:
+                            # 读取并丢弃ANSI转义序列的其余部分
+                            while select.select([sys.stdin], [], [], 0.01) != ([], [], []):
+                                sys.stdin.read(1)
+                        except:
+                            pass
+                        return None  # 不处理ANSI转义序列
+                    # 没有后续字符，是真正的ESC按键
+                
                 return char
             finally:
                 if self._old_settings:
@@ -149,7 +182,19 @@ class SimpleKeyboardListener:
                         continue
                         
                     char = sys.stdin.read(1)
-                    if ord(char) == 27:  # ESC键
+                    if ord(char) == 27:  # ESC字符
+                        # 检查是否为ANSI转义序列的开始
+                        if select.select([sys.stdin], [], [], 0.05) != ([], [], []):
+                            # 有后续字符，可能是ANSI转义序列，消耗掉这些字符
+                            try:
+                                # 读取并丢弃ANSI转义序列的其余部分
+                                while select.select([sys.stdin], [], [], 0.01) != ([], [], []):
+                                    sys.stdin.read(1)
+                            except:
+                                pass
+                            continue  # 不处理ANSI转义序列，继续监听
+                        
+                        # 没有后续字符，是真正的ESC按键
                         self.console.print("\n[yellow]⏸️  检测到 ESC 键，正在中断任务...[/yellow]")
                         if self._cancellation_source:
                             self._cancellation_source.cancel()

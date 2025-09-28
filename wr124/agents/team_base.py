@@ -269,7 +269,7 @@ class Team:
         
         agent_param = parse_agent_markdown(config_path)
         self.set_main_agent(agent_param)
-        self._console.print(f"[green]✓ 从配置文件加载主智能体: {config_path}[/green]")
+        self._console.print(f"[green]✓ 从配置文件加载主智能体完成: {config_path}[/green]")
 
     def register_agent_tool(self, config_path: str) -> AgentTool:
         """

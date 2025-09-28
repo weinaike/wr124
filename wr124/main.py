@@ -57,7 +57,7 @@ async def run_team(args: argparse.Namespace) -> AsyncGenerator[BaseAgentEvent | 
         tracer = telemetry.initialize()
         
         # 创建模型客户端        
-        model_client = config_manager.get_model_client()
+        model_client = config_manager.get_model_client(openai=not args.claude)
         # 创建Team实例
         team = Team(model_client)        
         
@@ -155,6 +155,7 @@ def run():
     parser.add_argument("-r", "--resume", action="store_true", help="是否从上次中断的地方恢复")
     parser.add_argument("-s", "--session_id", type=str, help="会话ID")
     parser.add_argument("-c", "--config_file", type=str, help="配置文件中的配置档案名称")
+    parser.add_argument("--claude", action="store_true", help="使用Claude模型（默认使用OpenAI模型）")
     args = parser.parse_args()    
 
     # 默认模式：直接使用Console处理

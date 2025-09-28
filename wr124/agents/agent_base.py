@@ -4,7 +4,9 @@ import asyncio
 import traceback
 from autogen_agentchat.teams import RoundRobinGroupChat
 from autogen_agentchat.agents import AssistantAgent
-from typing import Any, Awaitable, Callable, List, Mapping, Sequence, AsyncGenerator, Union, Optional
+from typing import Any, Awaitable, Callable, List, Mapping, Sequence, AsyncGenerator, Union, Optional, Tuple, Dict
+from pydantic import BaseModel
+
 from autogen_agentchat.messages import (
     BaseChatMessage, 
     BaseAgentEvent, 
@@ -14,28 +16,33 @@ from autogen_agentchat.messages import (
     MemoryQueryEvent, 
     ToolCallExecutionEvent, 
     ToolCallSummaryMessage,
-    ToolCallRequestEvent
+    ToolCallRequestEvent,
+    ThoughtEvent,
+    StructuredMessage,
+    
 )
-
-
+from autogen_ext.models.anthropic import AnthropicChatCompletionClient
+from autogen_agentchat.tools import AgentTool
 from autogen_agentchat.base import ChatAgent, TaskResult, Team, TerminationCondition, Response
+from autogen_agentchat.base import Handoff as HandoffBase
 from autogen_agentchat.conditions import TextMentionTermination, ExternalTermination
-from autogen_core import CancellationToken
-from autogen_core.models import ChatCompletionClient
+from autogen_core import CancellationToken, FunctionCall
+from autogen_core.models import ChatCompletionClient, CreateResult
 from autogen_core.tools import BaseTool
 from autogen_core.memory import Memory, ListMemory, MemoryContent
 from autogen_core import CancellationToken, ComponentBase, trace_create_agent_span, trace_invoke_agent_span
 from autogen_core import CancellationToken
-from autogen_core.model_context import UnboundedChatCompletionContext
+from autogen_core.model_context import UnboundedChatCompletionContext, ChatCompletionContext
 from autogen_core.models import (
     FunctionExecutionResult,
     LLMMessage,
     RequestUsage,
     UserMessage,
     SystemMessage,
-    AssistantMessage    
+    AssistantMessage,
+    FunctionExecutionResultMessage,
 )
-
+from autogen_core.tools import BaseTool, Workbench
 from rich.console import Console as RichConsole
 
 from ..session.session_state_manager import SessionStateManager, SessionStateStatus
@@ -85,6 +92,8 @@ class NoSystemUnboundedChatCompletionContext(UnboundedChatCompletionContext):
 
 class BaseAgent(AssistantAgent):
     component_provider_override = "BaseAgent"
+    _max_tokens_for_process = 40000  # 类变量，用于 _process_model_result 方法
+    
     def __init__(
         self,
         name: str,
@@ -112,6 +121,8 @@ class BaseAgent(AssistantAgent):
                 memory = list(memory) + [note_memory]  # 转换为 List 并添加元素
         else:
             memory = [note_memory]
+        if isinstance(model_client, AnthropicChatCompletionClient):
+            memory = None
         
         super().__init__(
             name,
@@ -129,6 +140,8 @@ class BaseAgent(AssistantAgent):
         self._termination_condition = TextMentionTermination(self._temrminate_word)
         self._model_client = model_client
         self._max_tokens = max_tokens   # token
+        # 设置类变量，供 _process_model_result 方法使用
+        BaseAgent._max_tokens_for_process = max_tokens
         self._min_tool_count_to_summary = 20
 
 
@@ -243,12 +256,18 @@ class BaseAgent(AssistantAgent):
                         break
                     if self._termination_condition.terminated or completed:
                         break
+
+                    models_usage = RequestUsage(0,0)
                     async for message in self.on_messages_stream(input_messages, cancellation_token):
                     
                         if isinstance(message, Response):
                             if trigger_summary:
                                 trigger_summary = False
                                 skip_stop = True # 如果上次是summary提示，则跳过终止条件检查（因为总结过程中可能输出 _I_HAVE_COMPLETED_ 字样），这个不是期望的， 其他时候都保持False
+                            # 统计token使用情况
+                            if message.chat_message.models_usage and message.chat_message.models_usage.prompt_tokens > models_usage.prompt_tokens:                                      
+                                models_usage = message.chat_message.models_usage
+
                             yield message.chat_message                            
                             output_messages.append(message.chat_message)
                             # 发送到记忆队列
@@ -263,9 +282,7 @@ class BaseAgent(AssistantAgent):
                             else:
                                 input_messages = []
                             tool_count = 0
-                            # 统计token使用情况
-                            if message.chat_message.models_usage:
-                                models_usage = message.chat_message.models_usage
+
                             
                             # 是否要跳过一次判断
                             if skip_stop:
@@ -281,6 +298,9 @@ class BaseAgent(AssistantAgent):
                                     break
 
                         else:
+                            if message.models_usage and message.models_usage.prompt_tokens > models_usage.prompt_tokens:                                      
+                                models_usage = message.models_usage
+
                             yield message
                             if isinstance(message, ModelClientStreamingChunkEvent):
                                 # Skip the model client streaming chunk events.
@@ -292,7 +312,7 @@ class BaseAgent(AssistantAgent):
                             self._add_to_memory_queue(message)
 
                     # 如果output_messages 计算token数量超过最大限制，则需要进行摘要，并将摘要作为新的输入
-                    if models_usage.prompt_tokens > self._max_tokens:
+                    if models_usage.prompt_tokens > self._max_tokens and not completed:
                         compress_count += 1
                         if compress_count > self._max_compress_count:
                             self._console.print(f"[yellow]⚠️  token压缩次数超过上限{self._max_compress_count}，停止[/yellow]")
@@ -303,13 +323,23 @@ class BaseAgent(AssistantAgent):
                         input_messages = input_messages_bak + summary
                         models_usage = RequestUsage(0,0)
                         await self.upload_state("compress history")                                                
-                        await self._model_context.clear() # 清空模型上下文，以便进行新的输入               
+                        await self._model_context.clear() # 清空模型上下文，以便进行新的输入    
 
-                yield TaskResult(messages=output_messages, stop_reason=stop_reason)
-            
+                    # 工具智能体每次使用后初始化          
+                    try:
+                        for tool in self._tools:
+                            if isinstance(tool, AgentTool):
+                                await tool._agent.on_reset(cancellation_token)  # 重置工具状态，避免工具内存过大
+                    except Exception as e:
+                        self._console.print(f"[red]⚠️  重置工具状态时出错: {e}[/red]")
+                if stop_reason == STOP_REASON.COMPLETED or stop_reason == STOP_REASON.MAX_ITERATIONS:
+                    hook_messages = await self._hook_agents_run(cancellation_token)
+                    output_messages.extend(hook_messages)
+
+                yield TaskResult(messages=output_messages, stop_reason=stop_reason)                    
             finally:
                 await self._cleanup_memory_task()
-                await self._hook_agents_run(cancellation_token)
+                
 
 
     async def on_messages_stream(self, messages: Sequence[BaseChatMessage], cancellation_token: CancellationToken
@@ -383,12 +413,24 @@ class BaseAgent(AssistantAgent):
                 self._console.print(f"[yellow]⚠️  挂钩智能体 {agent_param.name} 未配置任务，跳过[/yellow]")
                 continue
             try:
+
+                filtered_tools = []
+                
+                for tool_name in agent_param.tools:
+                    for tool in self._tools:
+                        if (hasattr(tool, 'name') and tool.name == tool_name) or \
+                            (hasattr(tool, '__name__') and tool.__name__ == tool_name) or \
+                            (hasattr(tool, 'schema') and tool.schema.get('name') == tool_name):
+                            filtered_tools.append(tool)
+                            break
+
                 hook_agent = AssistantAgent(
                     name=agent_param.name,
                     model_client=self._model_client,
                     description=agent_param.description,
                     system_message=agent_param.prompt,
-                    tools=self._tools,
+                    model_context=self._model_context,
+                    tools=filtered_tools,
                     reflect_on_tool_use=False,
                     max_tool_iterations=agent_param.max_tool_iterations if agent_param.max_tool_iterations is not None else 5,
                 )
@@ -480,7 +522,7 @@ class BaseAgent(AssistantAgent):
     async def upload_state(self, note: str):
         if self._session_manager:
             msgs = await self._model_context.get_messages()
-            if len(msgs) < 5:
+            if len(msgs) < 10:
                 return
             state = await self.save_state()
             await self._session_manager.upload_session_state(self.name, None, state, note)
@@ -501,6 +543,217 @@ class BaseAgent(AssistantAgent):
                 else:
                     return
 
+    @classmethod
+    async def _process_model_result(
+        cls,
+        model_result: CreateResult,
+        inner_messages: List[BaseAgentEvent | BaseChatMessage],
+        cancellation_token: CancellationToken,
+        agent_name: str,
+        system_messages: List[SystemMessage],
+        model_context: ChatCompletionContext,
+        workbench: Sequence[Workbench],
+        handoff_tools: List[BaseTool[Any, Any]],
+        handoffs: Dict[str, HandoffBase],
+        model_client: ChatCompletionClient,
+        model_client_stream: bool,
+        reflect_on_tool_use: bool,
+        tool_call_summary_format: str,
+        tool_call_summary_formatter: Callable[[FunctionCall, FunctionExecutionResult], str] | None,
+        max_tool_iterations: int,
+        output_content_type: type[BaseModel] | None,
+        message_id: str,
+        format_string: str | None = None,
+    ) -> AsyncGenerator[BaseAgentEvent | BaseChatMessage | Response, None]:
+        """
+        Handle final or partial responses from model_result, including tool calls, handoffs,
+        and reflection if needed. Supports tool call loops when enabled.
+        """
+
+        # Tool call loop implementation with streaming support
+        current_model_result = model_result
+        # This variable is needed for the final summary/reflection step
+        executed_calls_and_results: List[Tuple[FunctionCall, FunctionExecutionResult]] = []
+
+        for loop_iteration in range(max_tool_iterations):
+            # If direct text response (string), we're done
+            if isinstance(current_model_result.content, str):
+                # Use the passed message ID for the final message
+                if output_content_type:
+                    content = output_content_type.model_validate_json(current_model_result.content)
+                    yield Response(
+                        chat_message=StructuredMessage[output_content_type](  # type: ignore[valid-type]
+                            content=content,
+                            source=agent_name,
+                            models_usage=current_model_result.usage,
+                            format_string=format_string,
+                            id=message_id,
+                        ),
+                        inner_messages=inner_messages,
+                    )
+                else:
+                    yield Response(
+                        chat_message=TextMessage(
+                            content=current_model_result.content,
+                            source=agent_name,
+                            models_usage=current_model_result.usage,
+                            id=message_id,
+                        ),
+                        inner_messages=inner_messages,
+                    )
+                return
+
+            # Otherwise, we have function calls
+            assert isinstance(current_model_result.content, list) and all(
+                isinstance(item, FunctionCall) for item in current_model_result.content
+            )
+
+            # STEP 4A: Yield ToolCallRequestEvent
+            tool_call_msg = ToolCallRequestEvent(
+                content=current_model_result.content,
+                source=agent_name,
+                models_usage=current_model_result.usage,
+            )
+
+            inner_messages.append(tool_call_msg)
+            yield tool_call_msg
+
+            # STEP 4B: Execute tool calls with streaming support
+            # Use a queue to handle streaming results from tool calls.
+            stream = asyncio.Queue[BaseAgentEvent | BaseChatMessage | None]()
+
+            async def _execute_tool_calls(
+                function_calls: List[FunctionCall],
+                stream_queue: asyncio.Queue[BaseAgentEvent | BaseChatMessage | None],
+            ) -> List[Tuple[FunctionCall, FunctionExecutionResult]]:
+                results = await asyncio.gather(
+                    *[
+                        cls._execute_tool_call(
+                            tool_call=call,
+                            workbench=workbench,
+                            handoff_tools=handoff_tools,
+                            agent_name=agent_name,
+                            cancellation_token=cancellation_token,
+                            stream=stream_queue,
+                        )
+                        for call in function_calls
+                    ]
+                )
+                # Signal the end of streaming by putting None in the queue.
+                stream_queue.put_nowait(None)
+                return results
+
+            task = asyncio.create_task(_execute_tool_calls(current_model_result.content, stream))
+
+            while True:
+                event = await stream.get()
+                if event is None:
+                    # End of streaming, break the loop.
+                    break
+                if isinstance(event, BaseAgentEvent) or isinstance(event, BaseChatMessage):
+                    yield event
+                    inner_messages.append(event)
+                else:
+                    raise RuntimeError(f"Unexpected event type: {type(event)}")
+
+            # Wait for all tool calls to complete.
+            executed_calls_and_results = await task
+            exec_results = [result for _, result in executed_calls_and_results]
+
+            # Yield ToolCallExecutionEvent
+            tool_call_result_msg = ToolCallExecutionEvent(
+                content=exec_results,
+                source=agent_name,
+            )
+
+            await model_context.add_message(FunctionExecutionResultMessage(content=exec_results))
+            inner_messages.append(tool_call_result_msg)
+            yield tool_call_result_msg
+
+            # STEP 4C: Check for handoff
+            handoff_output = cls._check_and_handle_handoff(
+                model_result=current_model_result,
+                executed_calls_and_results=executed_calls_and_results,
+                inner_messages=inner_messages,
+                handoffs=handoffs,
+                agent_name=agent_name,
+            )
+            if handoff_output:
+                yield handoff_output
+                return
+
+            # STEP 4D: Check if we should continue the loop.
+            # If we are on the last iteration, break to the summary/reflection step.
+            if loop_iteration == max_tool_iterations - 1:
+                break
+            print(current_model_result.usage.prompt_tokens, current_model_result.usage.completion_tokens)
+            if current_model_result.usage.prompt_tokens > cls._max_tokens_for_process:
+                print(f"⚠️  Token usage {current_model_result.usage.prompt_tokens} exceeds limit {cls._max_tokens_for_process}, stopping tool call loop.")
+                break
+
+            # Continue the loop: make another model call using _call_llm
+            next_model_result: Optional[CreateResult] = None
+            async for llm_output in cls._call_llm(
+                model_client=model_client,
+                model_client_stream=model_client_stream,
+                system_messages=system_messages,
+                model_context=model_context,
+                workbench=workbench,
+                handoff_tools=handoff_tools,
+                agent_name=agent_name,
+                cancellation_token=cancellation_token,
+                output_content_type=output_content_type,
+                message_id=message_id,  # Use same message ID for consistency
+            ):
+                if isinstance(llm_output, CreateResult):
+                    next_model_result = llm_output
+                else:
+                    # Streaming chunk event
+                    yield llm_output
+
+            assert next_model_result is not None, "No model result was produced in tool call loop."
+            current_model_result = next_model_result
+
+            # Yield thought event if present
+            if current_model_result.thought:
+                thought_event = ThoughtEvent(content=current_model_result.thought, source=agent_name)
+                yield thought_event
+                inner_messages.append(thought_event)
+
+            # Add the assistant message to the model context (including thought if present)
+            await model_context.add_message(
+                AssistantMessage(
+                    content=current_model_result.content,
+                    source=agent_name,
+                    thought=getattr(current_model_result, "thought", None),
+                )
+            )
+
+        # After the loop, reflect or summarize tool results
+        if reflect_on_tool_use:
+            async for reflection_response in cls._reflect_on_tool_use_flow(
+                system_messages=system_messages,
+                model_client=model_client,
+                model_client_stream=model_client_stream,
+                model_context=model_context,
+                workbench=workbench,
+                handoff_tools=handoff_tools,
+                agent_name=agent_name,
+                inner_messages=inner_messages,
+                output_content_type=output_content_type,
+                cancellation_token=cancellation_token,
+            ):
+                yield reflection_response
+        else:
+            yield cls._summarize_tool_use(
+                executed_calls_and_results=executed_calls_and_results,
+                inner_messages=inner_messages,
+                handoffs=handoffs,
+                tool_call_summary_format=tool_call_summary_format,
+                tool_call_summary_formatter=tool_call_summary_formatter,
+                agent_name=agent_name,
+            )
+        return
 if __name__ == "__main__":
     from autogen_ext.models.openai import OpenAIChatCompletionClient
     from autogen_agentchat.ui import Console

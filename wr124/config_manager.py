@@ -3,13 +3,14 @@
 使用配置文件替代硬编码配置
 """
 import os
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from pydantic import BaseModel, Field, validator
 from enum import Enum
 from pathlib import Path
 from dotenv import load_dotenv
 import json
 from autogen_ext.models.openai import OpenAIChatCompletionClient
+from autogen_ext.models.anthropic import AnthropicChatCompletionClient
 from autogen_core.models import ModelInfo
 from .session.session_state_manager import SessionParam
 from .mcp import StdioServerParams, StreamableHttpServerParams, SseServerParams
@@ -168,8 +169,8 @@ class ConfigManager:
         else:
             print("No configuration profile found.")
             self.config = WR124Config()
-    
-    def get_model_client(self, model: Optional[str] = None) -> OpenAIChatCompletionClient:
+
+    def get_model_client(self, model: Optional[str] = None, openai=True) -> Union[OpenAIChatCompletionClient, AnthropicChatCompletionClient]:
         """创建模型客户端"""
         model_config = ModelConfig(name=os.getenv("WR124_DEFAULT_MODEL", "glm-4.5"))
 
@@ -178,8 +179,8 @@ class ConfigManager:
         
         if model:
             model_config.name = model
-            
-        return OpenAIChatCompletionClient(
+        if openai:
+            return OpenAIChatCompletionClient(
             model=model_config.name,
             timeout=model_config.timeout,
             temperature=model_config.temperature,
@@ -194,7 +195,24 @@ class ConfigManager:
                 structured_output=model_config.structured_output,
                 multiple_system_messages=model_config.multiple_system_messages,
             )
-        )
+            )
+        else:
+            return AnthropicChatCompletionClient(
+                model=model_config.name,
+                timeout=model_config.timeout,
+                temperature=model_config.temperature,
+                max_retries=model_config.max_retries,
+                api_key=model_config.api_key if model_config.api_key else os.getenv("ANTHROPIC_API_KEY",' '),
+                base_url=model_config.base_url if model_config.base_url else os.getenv("ANTHROPIC_BASE_URL",' '),
+                model_info=ModelInfo(
+                    vision=model_config.vision,
+                    function_calling=model_config.function_calling,
+                    json_output=model_config.json_output,
+                    family="claude-4-sonnet",
+                    structured_output=model_config.structured_output,
+                    multiple_system_messages=False,
+                )
+            )
     
     def _convert_mcp_config(self, server_config: MCPServerConfig) -> Any:
         """Convert MCPServerConfig to specific MCP parameter object with type inference"""
