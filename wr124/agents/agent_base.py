@@ -259,7 +259,6 @@ class BaseAgent(AssistantAgent):
 
                     models_usage = RequestUsage(0,0)
                     async for message in self.on_messages_stream(input_messages, cancellation_token):
-                    
                         if isinstance(message, Response):
                             if trigger_summary:
                                 trigger_summary = False
@@ -282,7 +281,6 @@ class BaseAgent(AssistantAgent):
                             else:
                                 input_messages = []
                             tool_count = 0
-
                             
                             # 是否要跳过一次判断
                             if skip_stop:
@@ -300,16 +298,20 @@ class BaseAgent(AssistantAgent):
                         else:
                             if message.models_usage and message.models_usage.prompt_tokens > models_usage.prompt_tokens:                                      
                                 models_usage = message.models_usage
-
-                            yield message
-                            if isinstance(message, ModelClientStreamingChunkEvent):
-                                # Skip the model client streaming chunk events.
-                                continue
                             if isinstance(message,ToolCallRequestEvent):
                                 tool_count += 1
+                            if isinstance(message, ModelClientStreamingChunkEvent) or isinstance(message, MemoryQueryEvent) or isinstance(message, ToolCallExecutionEvent):
+                                # Skip the model client streaming chunk events.
+                                continue
+                            yield message
+
                             output_messages.append(message)
                             # 发送到记忆队列
                             self._add_to_memory_queue(message)
+
+
+                    if isinstance(self._model_context, NoSystemUnboundedChatCompletionContext):
+                        self._model_context.remove_system_messages()
 
                     # 如果output_messages 计算token数量超过最大限制，则需要进行摘要，并将摘要作为新的输入
                     if models_usage.prompt_tokens > self._max_tokens and not completed:
@@ -340,70 +342,6 @@ class BaseAgent(AssistantAgent):
             finally:
                 await self._cleanup_memory_task()
                 
-
-
-    async def on_messages_stream(self, messages: Sequence[BaseChatMessage], cancellation_token: CancellationToken
-                                 )-> AsyncGenerator[Union[BaseAgentEvent, BaseChatMessage, Response], None]:
-        """
-        重载底层AssitantAgent的on_messages_stream方法, 主要添加工具调用失败后重试功能
-        1. 处理消息流，添加异常处理和重试机制
-        2. 最多重试5次，每次间隔递增的等待时间
-        """
-        max_retries = 3
-        retry_delay = 1  # 初始延迟2秒
-        
-        attempt = 0
-        while(attempt <= max_retries):       
-            try:
-                async for message in super().on_messages_stream(messages, cancellation_token):
-                    if isinstance(message, MemoryQueryEvent) :
-                        continue
-                    if isinstance(message, ToolCallExecutionEvent):
-                        attempt = 0
-                        continue
-                    yield message
-                # 如果成功处理完所有消息，直接返回
-                # self._model_context中添加进去的SystemMessage都给踢出来。避免SystemMessage在模型上下文中重复添加
-                if isinstance(self._model_context, NoSystemUnboundedChatCompletionContext):
-                    self._model_context.remove_system_messages()
-                    
-                return               
-            except asyncio.CancelledError:
-                # 重新抛出取消异常，让上层处理               
-                raise
-            
-            except Exception as e:
-                attempt += 1
-                # 检查是否是MCP流式调用相关的异常（通常来自anyio库）
-                exception_name = type(e).__name__
-                if exception_name in ['BrokenResourceError', 'ClosedResourceError']:
-                    # 这些异常通常表示流被中断，可能是由于ESC键中断
-                    self._console.print(f"[yellow][{self.name}] MCP stream interrupted ({exception_name}), handling gracefully...[/yellow]")
-                    # 如果是取消引起的，直接返回
-                    if cancellation_token and cancellation_token.is_cancelled():
-                        self._console.print(f"[cyan][{self.name}] Task was cancelled, stopping gracefully.[/cyan]")
-                        return
-                    # 对于流中断异常，不重试，直接返回
-                    self._console.print(f"[yellow][{self.name}] Stream interrupted, ending task execution.[/yellow]")
-                    return
-                
-                error_detail = traceback.format_exc()
-                content = f"遇到一个错误，请确认工具调用参数格式都正确。问题如下:\n{str(e)}\n{error_detail}"
-                messages = [TextMessage(content=content, source='user')]
-
-                # 如果是最后一次尝试，抛出异常
-                if attempt >= max_retries:
-                    final_error_msg = f"[{self.name}] Failed after {max_retries + 1} attempts. Final error: {type(e).__name__}: {str(e)}\n{error_detail}"
-                    # 重新抛出取消异常，让上层处理
-                    raise Exception(final_error_msg) from e
-                
-                # 计算下次重试的延迟时间（指数退避）
-                current_delay = retry_delay * (2 ** attempt)
-                self._console.print(f"[{self.name}] Retrying in {current_delay} seconds...", style="red")
-                await asyncio.sleep(current_delay)
-                if cancellation_token and cancellation_token.is_cancelled():
-                    return
-
 
     async def _hook_agents_run(self, cancellation_token: CancellationToken) -> List[BaseChatMessage]:
         """运行挂钩智能体，返回它们的输出消息列表"""
@@ -645,30 +583,60 @@ class BaseAgent(AssistantAgent):
 
             task = asyncio.create_task(_execute_tool_calls(current_model_result.content, stream))
 
-            while True:
-                event = await stream.get()
-                if event is None:
-                    # End of streaming, break the loop.
-                    break
-                if isinstance(event, BaseAgentEvent) or isinstance(event, BaseChatMessage):
-                    yield event
-                    inner_messages.append(event)
-                else:
-                    raise RuntimeError(f"Unexpected event type: {type(event)}")
+            try:
+                while True:
+                    event = await stream.get()
+                    if event is None:
+                        # End of streaming, break the loop.
+                        break
+                    if isinstance(event, BaseAgentEvent) or isinstance(event, BaseChatMessage):
+                        yield event
+                        inner_messages.append(event)
+                    else:
+                        raise RuntimeError(f"Unexpected event type: {type(event)}")
 
-            # Wait for all tool calls to complete.
-            executed_calls_and_results = await task
-            exec_results = [result for _, result in executed_calls_and_results]
+                # Wait for all tool calls to complete.
+                executed_calls_and_results = await task
+            except Exception as e:
+                # 如果工具调用出错，创建错误结果并继续处理
+                import traceback
+                error_msg = f"Tool execution failed: {str(e)}\nTraceback:\n{traceback.format_exc()}"
+                print(error_msg)
+                # 创建失败的执行结果
+                failed_results = []
+                for call in current_model_result.content:
+                    failed_result = FunctionExecutionResult(
+                        content=error_msg,
+                        call_id=call.id,
+                        name=call.name
+                    )
+                    failed_results.append((call, failed_result))
+                
+                executed_calls_and_results = failed_results
+                
+                # 发送错误事件
+                error_event = ToolCallExecutionEvent(
+                    content=[result for _, result in failed_results],
+                    source=agent_name,
+                )
+                yield error_event
+                inner_messages.append(error_event)
+                
+                # 将错误结果也添加到模型上下文中
+                exec_results = [result for _, result in failed_results]
+                await model_context.add_message(FunctionExecutionResultMessage(content=exec_results))
+            else:
+                exec_results = [result for _, result in executed_calls_and_results]
 
-            # Yield ToolCallExecutionEvent
-            tool_call_result_msg = ToolCallExecutionEvent(
-                content=exec_results,
-                source=agent_name,
-            )
+                # Yield ToolCallExecutionEvent
+                tool_call_result_msg = ToolCallExecutionEvent(
+                    content=exec_results,
+                    source=agent_name,
+                )
 
-            await model_context.add_message(FunctionExecutionResultMessage(content=exec_results))
-            inner_messages.append(tool_call_result_msg)
-            yield tool_call_result_msg
+                await model_context.add_message(FunctionExecutionResultMessage(content=exec_results))
+                inner_messages.append(tool_call_result_msg)
+                yield tool_call_result_msg
 
             # STEP 4C: Check for handoff
             handoff_output = cls._check_and_handle_handoff(

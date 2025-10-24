@@ -77,3 +77,4 @@ temp/
 *.tmp
 *.temp
 wr124/
+screenlog_*.log

@@ -85,6 +85,8 @@ class APIServerConfig(BaseModel):
     """API Server configuration"""
     url: str = Field(description="API server URL")
     timeout: int = Field(default=30, description="Request timeout in seconds")
+    project_id: Optional[str] = Field(default=None, description="Project ID (optional)")
+    session_id: Optional[str] = Field(default=None, description="Session ID (optional)")
 
 
 class LoggingConfig(BaseModel):
@@ -285,7 +287,6 @@ class ConfigManager:
             except Exception as e:
                 print(f"Warning: Failed to configure MCP server '{server_name}': {e}")
                 continue
-                
         return servers
     
     def get_session_server(self) -> Optional[SessionParam]:
@@ -299,8 +300,8 @@ class ConfigManager:
         )        
         api_config = self.config.sessionServer
         return SessionParam(
-            project_id=self.project_id,
-            session_id=self.session_id,
+            project_id= api_config.project_id if api_config.project_id else self.project_id,
+            session_id= api_config.session_id if api_config.session_id else self.session_id,
             api_url=api_config.url,
             timeout=api_config.timeout
         )

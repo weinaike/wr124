@@ -327,12 +327,7 @@ class Team:
         except Exception as e:
             # 处理其他可能的异常
             # 检查是否是重试失败后的包装异常
-            error_msg = str(e)
-            if "Failed after" in error_msg and "attempts" in error_msg:
-                # 这是来自底层重试机制的异常，提取原始错误信息
-                self._console.print(f"[red]⚠️  任务执行失败（已重试）: {error_msg}[/red]")
-            else:
-                self._console.print(f"[red]⚠️  任务执行时发生异常: {e}[/red]")
+            self._console.print(f"[red]⚠️  任务执行时发生异常: {e}[/red]")
             yield TextMessage(content=f"任务执行异常: {str(e)}", source="system")
         finally:
             await self._main_agent.upload_state(task)

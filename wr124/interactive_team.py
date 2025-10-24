@@ -100,7 +100,7 @@ class InteractiveTeam:
                 except Exception as e:
                     # 处理MCP流式调用可能的异常
                     exception_name = type(e).__name__
-                    if exception_name in ['BrokenResourceError', 'ClosedResourceError', 'CancelledError']:
+                    if exception_name in ['BrokenResourceError', 'ClosedResourceError', 'CancelledError', 'AuthenticationError']:
                         # 这些异常通常由ESC键中断引起
                         self._console.print(f"[yellow]⏸️  任务执行被中断 ({exception_name})[/yellow]")
                         task_was_cancelled = True

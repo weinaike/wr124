@@ -144,7 +144,7 @@ async def run_team(args: argparse.Namespace) -> AsyncGenerator[BaseAgentEvent | 
 
 def run():
     """命令行脚本入口点"""
-        # 解析命令行参数
+    # 解析命令行参数
     parser = argparse.ArgumentParser(description="运行Agent，执行指定任务。")
     parser.add_argument("-t", "--task", type=str, help="要执行的任务（如未提供，将启用交互模式）")
     parser.add_argument("-p", "--project_id", type=str, help="项目ID（如未提供，使用当前目录名）")
@@ -157,6 +157,21 @@ def run():
     parser.add_argument("-c", "--config_file", type=str, help="配置文件中的配置档案名称")
     parser.add_argument("--claude", action="store_true", help="使用Claude模型（默认使用OpenAI模型）")
     args = parser.parse_args()    
+
+    # 环境变量文件查询逻辑：配置 -> 启动目录的.env -> 用户目录下的.env -> 空
+    if args.env_file is None:
+        # 检查当前工作目录下是否有 .env 文件
+        current_dir_env = Path.cwd() / ".env"
+        if current_dir_env.exists():
+            args.env_file = str(current_dir_env)
+        else:
+            # 检查用户主目录下是否有 .env 文件
+            user_dir_env = Path.home() / ".env"
+            if user_dir_env.exists():
+                args.env_file = str(user_dir_env)
+            else:
+                # 都不存在则保持为空
+                args.env_file = None
 
     # 默认模式：直接使用Console处理
     async def console_run():

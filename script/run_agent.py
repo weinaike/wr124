@@ -82,7 +82,7 @@ async def main():
         # 注册工具
         # tools = await tool_manager.register_tools(tool_mapping)
         # tools = await tool_manager.register_tools(mcp_servers['base_tools'])
-        tools = await tool_manager.register_tools(mcp_servers['task'])
+        tools = await tool_manager.register_tools("task", mcp_servers['task'])
         # tools = await tool_manager.register_tools(mcp_servers['docker'])
 
         async with create_mcp_server_session(mcp_servers['docker']) as session:
