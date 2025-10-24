@@ -78,3 +78,5 @@ temp/
 *.temp
 wr124/
 screenlog_*.log
+cpp_build_new/
+cpp_build/
