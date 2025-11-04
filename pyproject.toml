@@ -34,8 +34,9 @@ dependencies = [
 [project.scripts]
 wr124 = "wr124.main:run"
 
-[tool.setuptools]
-packages = ["wr124"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wr124*"]
 
 [project.optional-dependencies]
 dev = [
@@ -47,5 +48,5 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/weinaike/wr124"
-Repository = "https://github.com/weinaike/wr124.git"
+Homepage = "https://gitlab.zhejianglab.com/weinaike/wr124"
+Repository = "https://gitlab.zhejianglab.com/weinaike/wr124.git"
